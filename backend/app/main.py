@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import data, feedstock, forecasting, health, simulation
+from app.api import data, feedstock, financial, forecasting, health, simulation
 from app.core.config import get_settings
 from app.core.logging import configure_logging
 from app.db.base import Base, engine
@@ -49,3 +49,4 @@ app.include_router(data.router)
 app.include_router(forecasting.router)
 app.include_router(feedstock.router)
 app.include_router(simulation.router)
+app.include_router(financial.router)

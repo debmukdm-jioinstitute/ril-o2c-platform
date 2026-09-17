@@ -4,9 +4,10 @@
 
 This card covers every model currently implemented: the five forecasters in
 `models/forecasting/`, their ensemble, the feedstock economics / switch-point engine in
-`models/feedstock/`, and the Monte Carlo scenario engine in `simulation/`. It does not cover
-planned-but-unbuilt modules (the full capacity expansion financial model, reverse stress
-testing, root-cause engine) — see [METHODOLOGY.md](METHODOLOGY.md) for their intended design.
+`models/feedstock/`, the Monte Carlo scenario engine in `simulation/`, and the capacity
+expansion financial model in `financial/`. It does not cover planned-but-unbuilt modules
+(reverse stress testing, performance monitoring, root-cause engine) — see
+[METHODOLOGY.md](METHODOLOGY.md) for their intended design.
 
 ## Intended use
 
@@ -108,6 +109,38 @@ large-sample draws matches the target matrix within tolerance), and that NPV/IRR
 correctly to WACC/delay changes. No Monte Carlo output is hard-coded — every number in an API
 response is computed live from the request's inputs and seed.
 
+## Capacity expansion financial model
+
+**Method:** deterministic monthly discounted cash flow, not a fitted/trained model — see
+METHODOLOGY.md §6. Reuses the exact same accounting identity as the feedstock economics engine
+(`compute_cracker_economics`) for every month's EBITDA, scaled by that month's ramp-curve
+utilization, so this model and the Phase 3 single-scenario engine cannot silently diverge.
+
+**Known limitations:**
+- Pre-tax, unlevered free cash flow — no depreciation, tax shield, or debt/financing schedule.
+  A real investment-committee model would need these; this is a decision-support approximation.
+- Construction-period capex is spread **evenly** across the months to commissioning — no
+  support yet for a real S-curve or milestone-based spend schedule (flagged as a natural
+  extension in RESEARCH_FRAMEWORK.md).
+- Delay scenarios assume total capex is unchanged by a schedule slip (a pure timing delay);
+  if a real delay would also inflate costs (e.g. contractor claims, extended overheads), that
+  needs to be modeled as a higher `total_capex_usd` input for that scenario, not assumed away.
+- The `accelerated` scenario's benefit is entirely mechanical (earlier cash flows discounted
+  less, weighed against `acceleration_cost_usd`) — it does not model execution risk of
+  compressing a schedule (e.g. higher probability of rework), which a real capital committee
+  would weigh alongside the NPV number.
+- IRR is `None`/`null` when no root exists in `[-50%, 500%]`, same reasoning and same bounds as
+  the Monte Carlo IRR solver (see MODEL_CARD's Monte Carlo section above).
+- `construction_progress_pct` is informational only in this model — it doesn't feed the cash
+  flow calculation (only `spent_capex_usd`/`total_capex_usd` do). It exists for the
+  `progress_divergence_flag` QA check and for a future executive-dashboard display.
+
+**Evaluation:** `tests/unit/test_project_model.py` and `tests/unit/test_scenarios.py` check that
+delay reduces NPV, higher WACC reduces NPV, no EBITDA accrues during construction, the capex
+schedule sums exactly to what's expected, steady-state EBITDA matches the scalar economics
+engine at full utilization, and that all five standard scenarios are internally consistent
+(e.g. longer delay is monotonically worse). No result is hard-coded.
+
 ## Fairness / bias note
 
 The one bias risk explicitly guarded against by the spec — assuming a feedstock is structurally
@@ -117,6 +150,7 @@ this domain (commodity price/economics modeling, not decisions about people).
 
 ## Governance
 
-Every forecast and Monte Carlo response carries a `ModelGovernance` envelope: model name,
-version, data period, horizon, confidence level, generation timestamp, assumptions,
-data-quality flag, random seed. See `backend/app/schemas/governance.py`.
+Every forecast, Monte Carlo, and financial-model response carries a `ModelGovernance` envelope:
+model name, version, data period, horizon, confidence level, generation timestamp, assumptions,
+data-quality flag, random seed (`null` for the financial model, which has no stochastic
+component). See `backend/app/schemas/governance.py`.

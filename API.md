@@ -76,6 +76,35 @@ series returns `400` with a message listing the valid options.
   ~0.7s for 10,000 scenarios, ~1.6s for 50,000, on a single request thread — see
   ARCHITECTURE.md for why (vectorized NPV, per-scenario `brentq` for IRR).
 
+## Capacity expansion financial model (`backend/app/api/financial.py`)
+
+- `GET /api/financial/feedstocks` → feedstocks supported (all four — `ethane`, `propane`,
+  `butane`, `naphtha` — unlike the Monte Carlo engine, this model reuses the full single-scenario
+  economics engine).
+- `POST /api/financial/project` — one project run (base case, or with `delay_days`/
+  `acceleration_days`/`acceleration_cost_usd` applied) →
+  `{npv_usd, irr_annual, payback_months, total_capex_deployed_usd,
+  steady_state_annual_ebitda_usd, commissioning_date, months_to_commission, schedule[],
+  governance}`. `schedule` is one row per month (construction → ramp-up → steady-state) — see
+  DATA_DICTIONARY.md.
+  ```json
+  {"capex": {"total_capex_usd": 2000000000, "committed_capex_usd": 1500000000,
+             "spent_capex_usd": 500000000, "construction_progress_pct": 25},
+   "operating": {"feedstock": "ethane", "nameplate_throughput_tons_day": 3000,
+                 "feedstock_price": 8.5, "ethylene_price_usd_ton": 950,
+                 "propylene_price_usd_ton": 900, "byproduct_price_usd_ton": 500,
+                 "conversion_cost_usd_ton_feedstock": 60, "logistics_cost_usd_ton_feedstock": 15},
+   "wacc": 0.11, "valuation_date": "2026-01-01", "planned_commissioning_date": "2027-01-01",
+   "ramp_up_months": 6, "ramp_start_utilisation_pct": 30, "post_ramp_operating_life_years": 15}
+  ```
+- `POST /api/financial/scenarios` — same request body → runs `base_case`,
+  `delay_1_month`, `delay_3_month`, `delay_6_month`, and (only if `acceleration_days` and
+  `acceleration_cost_usd` are both > 0) `accelerated`, each with NPV/IRR/payback/EBITDA deltas
+  against the base case → `{scenarios: {...}, governance}`.
+
+Both endpoints return HTTP 400 for an unknown feedstock; Pydantic-level validation (e.g.
+`spent_capex_usd > committed_capex_usd`) returns HTTP 422.
+
 ## Error handling
 
 All validation errors return HTTP 400 with a plain-English `detail` message (unknown series,

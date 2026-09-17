@@ -127,6 +127,47 @@ Only `ethane` and `naphtha` are supported as MC feedstocks in this phase — tho
 feedstocks with a scenario price variable. The API returns a clear `400` for `propane`/`butane`
 pointing at the single-scenario switch-point engine instead.
 
+## Capacity expansion financial model internals (`financial/`)
+
+Four modules, mirroring the same "small, independently testable pieces" pattern as
+`simulation/`:
+
+- `ramp_up.py` — `default_ramp_curve(months, start_pct, end_pct)` generates a linear
+  utilization ramp; callers with a real engineering ramp schedule pass their own list instead.
+- `capex_schedule.py` — `CapexStatus` holds the four capex-tracking figures the spec asks for
+  (total/committed/spent, plus physical `construction_progress_pct`); `remaining_capex_usd` is
+  always *derived* (`total - spent`), never a separate input, so it can't drift out of sync.
+  `progress_divergence_flag` is a soft QA signal (not an error) when cash spent and physical
+  progress diverge by more than 15 points — a real project-controls concern, not invented for
+  this repo.
+- `project_model.py` — the core: `build_monthly_schedule` produces one row per month across
+  three phases (construction → ramp-up → steady-state), reusing
+  `models.feedstock.economics.compute_cracker_economics` for every month's EBITDA (scaled by
+  that month's utilization) so this model and the Phase 3 single-scenario engine can never
+  quietly disagree on the underlying accounting identity. `run_capex_project` discounts the
+  schedule to NPV, solves IRR via `brentq` (bounds `[-50%, 500%]`, same reasoning as the Monte
+  Carlo IRR solver — see METHODOLOGY.md §5), and finds payback as the first month where
+  cumulative undiscounted FCF crosses zero.
+- `scenarios.py` — `run_standard_scenarios` runs the exact scenario set the spec asks for (base
+  case, 1/3/6-month delay, accelerated commissioning — only included if the caller supplied a
+  positive `acceleration_days`/`acceleration_cost_usd`) and prices each one against the base
+  case: NPV delta, IRR delta, payback delta, steady-state EBITDA delta. Delay scenarios always
+  start from a clean (delay=0, acceleration=0) copy of the caller's inputs, so "base case" in
+  the result is always the true zero-delay case, not whatever delay the caller's own inputs
+  happened to carry.
+
+Already-spent capex (`CapexStatus.spent_capex_usd`) is excluded from NPV as a sunk cost — only
+`remaining_capex_usd` (plus any acceleration cost) is discounted forward from the valuation
+date. This is a deliberate, standard capital-budgeting choice (see METHODOLOGY.md §6), not an
+oversight; it's why the same project can show a large historical spend and still have a
+strongly positive forward-looking NPV.
+
+Unlike the forecasters and the Monte Carlo engine, `financial/` does not build its own
+`ModelGovernance` inline — a single API call here can produce several correlated results (one
+project run, or a five-way scenario comparison), so the governance envelope is built once at
+the API layer (`backend/app/api/financial.py`) covering the whole response, rather than
+redundantly per scenario.
+
 ## Governance envelope
 
 Every forecaster and (where applicable) every economics run attaches a `ModelGovernance` object

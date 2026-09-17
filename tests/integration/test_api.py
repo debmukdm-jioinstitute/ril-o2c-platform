@@ -127,3 +127,60 @@ def test_monte_carlo_unknown_feedstock(client):
         "n_scenarios": 10000, "seed": 42,
     })
     assert resp.status_code == 400
+
+
+def _financial_project_payload(**overrides):
+    payload = {
+        "capex": {
+            "total_capex_usd": 2_000_000_000, "committed_capex_usd": 1_500_000_000,
+            "spent_capex_usd": 500_000_000, "construction_progress_pct": 25,
+        },
+        "operating": {
+            "feedstock": "ethane", "nameplate_throughput_tons_day": 3000, "feedstock_price": 8.5,
+            "ethylene_price_usd_ton": 950, "propylene_price_usd_ton": 900,
+            "byproduct_price_usd_ton": 500, "conversion_cost_usd_ton_feedstock": 60,
+            "logistics_cost_usd_ton_feedstock": 15, "fx_usdinr": 83.5,
+        },
+        "wacc": 0.11, "valuation_date": "2026-01-01", "planned_commissioning_date": "2027-01-01",
+        "ramp_up_months": 6, "ramp_start_utilisation_pct": 30, "post_ramp_operating_life_years": 15,
+    }
+    payload.update(overrides)
+    return payload
+
+
+def test_financial_project(client):
+    resp = client.post("/api/financial/project", json=_financial_project_payload())
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["months_to_commission"] > 0
+    assert body["payback_months"] is not None
+    assert len(body["schedule"]) > 0
+    assert body["governance"]["model_name"] == "capacity_expansion_financial_model"
+
+
+def test_financial_project_unknown_feedstock(client):
+    payload = _financial_project_payload()
+    payload["operating"]["feedstock"] = "coal"
+    resp = client.post("/api/financial/project", json=payload)
+    assert resp.status_code == 400
+
+
+def test_financial_project_rejects_bad_capex_ordering(client):
+    payload = _financial_project_payload()
+    payload["capex"]["spent_capex_usd"] = 9_999_999_999
+    resp = client.post("/api/financial/project", json=payload)
+    assert resp.status_code == 422  # Pydantic model_validator rejects it
+
+
+def test_financial_scenarios(client):
+    resp = client.post("/api/financial/scenarios", json=_financial_project_payload(
+        acceleration_days=60, acceleration_cost_usd=80_000_000,
+    ))
+    assert resp.status_code == 200
+    body = resp.json()
+    assert "base_case" in body["scenarios"]
+    assert "delay_1_month" in body["scenarios"]
+    assert "delay_3_month" in body["scenarios"]
+    assert "delay_6_month" in body["scenarios"]
+    assert "accelerated" in body["scenarios"]
+    assert body["scenarios"]["delay_6_month"]["npv_delta_vs_base_usd"] < body["scenarios"]["delay_1_month"]["npv_delta_vs_base_usd"]

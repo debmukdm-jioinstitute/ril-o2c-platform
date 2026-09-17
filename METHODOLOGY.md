@@ -175,15 +175,67 @@ alongside it is internally consistent (drawn together, not independently reconst
 (spec requirement) and is fully deterministic given `seed` — same seed, same inputs, same
 output, every field (see `tests/unit/test_monte_carlo.py::test_reproducible_given_seed`).
 
-## 6. Capacity expansion financial model **(planned, not yet implemented — beyond the flat-annuity NPV/IRR in §5)**
+## 6. Capacity expansion financial model (`financial/`)
 
-Intended approach: standard discounted cash flow over the project's construction + operating
-life, with an actual multi-year ramp-up curve and phased capex schedule (§5's NPV/IRR uses a
-flat EBITDA annuity and all-at-once capex as a deliberate simplification for Monte Carlo speed).
-`NPV = Σ_t FCF_t / (1+r)^t − Σ_t capex_t`; `IRR` via the same `brentq` approach as §5; payback =
-first period where cumulative FCF ≥ 0. Delay scenarios (1/3/6-month, accelerated) shift the
-commissioning date and ramp-up curve and re-run the same DCF — the "economic value/cost" of a
-scenario is simply the NPV delta against the base case.
+A month-granularity discounted cash flow, replacing §5's flat-annuity simplification with an
+actual construction → ramp-up → steady-state schedule. Three phases per project timeline:
+
+**Construction phase.** Length = months from the valuation date to the (possibly
+delayed/accelerated) commissioning date. `remaining_capex = total_capex − spent_capex` (already
+spent capex is sunk — see below) plus any acceleration cost, spread **evenly** across the
+construction months:
+
+```
+monthly_capex = (remaining_capex + acceleration_cost) / months_to_commission
+```
+
+No EBITDA is generated during construction (utilization = 0).
+
+**Ramp-up phase.** Length = however many months the supplied ramp curve has (default: a linear
+climb from `ramp_start_utilisation_pct` to 100% over `ramp_up_months`, via
+`financial.ramp_up.default_ramp_curve`). Each month's EBITDA is computed by calling the exact
+same function as the single-scenario feedstock economics engine (§3),
+`compute_cracker_economics`, with `throughput_tons_day = nameplate_throughput × utilisation_frac`
+for that month, then converting the daily figure to a monthly one via `× 365.25/12` (average
+month length). Reusing §3's function directly — not a re-derived copy — is what guarantees this
+model and the feedstock economics engine can never quietly disagree on the underlying
+accounting identity.
+
+**Steady-state phase.** Length = `post_ramp_operating_life_years × 12` months, utilization held
+at the ramp curve's final value (typically 100%).
+
+**Discounting, NPV, IRR, payback:**
+
+```
+monthly_rate = (1 + wacc)^(1/12) − 1
+NPV = Σ_t (EBITDA_t − capex_t) / (1 + monthly_rate)^t                    [t = 1..T months]
+IRR = the annual rate r solving NPV(r) = 0, found by converting each candidate monthly
+      rate (1+r)^(1/12) − 1 into the same NPV formula and root-finding with brentq over
+      r ∈ [−50%, 500%] — the same bounded-search reasoning as the Monte Carlo IRR solver (§5):
+      rates near −100% make (1+rate)^−t blow up and manufacture spurious roots.
+payback_months = the first month index where cumulative *undiscounted* FCF ≥ 0
+```
+
+**Sunk-cost treatment.** `spent_capex_usd` never appears in the NPV/IRR calculation — only
+`remaining_capex_usd` (`total − spent`) plus any acceleration cost is discounted forward from
+the valuation date. This is standard capital-budgeting practice (a decision made today should
+be evaluated on future cash flows only, not money already spent) and is exactly why a project
+with heavy historical spend can still show a strongly positive forward NPV: the NPV answers "is
+finishing this project worth it from today," not "was starting it worth it in hindsight."
+
+**Scenario comparison (`financial/scenarios.py`).** Five named scenarios: `base_case`
+(delay=0, no acceleration), `delay_1_month`/`delay_3_month`/`delay_6_month` (commissioning
+pushed back 30/90/180 days, same total capex — a pure schedule slip), and `accelerated`
+(commissioning pulled forward by `acceleration_days`, with `acceleration_cost_usd` added to the
+capex spent over the now-shorter construction window — only run if the caller supplies a
+positive acceleration). Every non-base scenario reports the "economic value/cost" the spec
+asks for as a direct delta against the base case: `npv_delta_vs_base_usd`,
+`irr_delta_vs_base_pp`, `payback_delta_months`, `ebitda_impact_delta_usd` (steady-state annual
+EBITDA delta — delay/acceleration change *when* full EBITDA is reached, not its steady-state
+level, so this delta is typically ≈0 unless the scenario also changes operating assumptions).
+Acceleration is not assumed to always be worth it — whether `accelerated`'s NPV beats or loses
+to `base_case` depends entirely on whether the time-value benefit of earlier cash flows outweighs
+`acceleration_cost_usd` at the given WACC, which the model computes rather than assumes.
 
 ## 7. Reverse stress testing **(planned, not yet implemented)**
 

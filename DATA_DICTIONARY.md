@@ -97,6 +97,43 @@ Illustrative, publicly-documented order-of-magnitude figures — not RIL-specifi
 | `downside_case` / `upside_case` | Every driver's value for the actual scenario nearest the P5 / P95 EBITDA mark — an internally consistent scenario, not a reconstructed one |
 | `governance` | Same `ModelGovernance` envelope as every forecast |
 
+## Capacity expansion financial model request (`CapexProjectRequest`, `backend/app/schemas/financial.py`)
+
+| Field | Unit | Notes |
+|---|---|---|
+| `capex.total_capex_usd` | USD | Total project capex |
+| `capex.committed_capex_usd` | USD | Contractually committed portion, ≤ total |
+| `capex.spent_capex_usd` | USD | Already spent, ≤ committed — sunk, excluded from NPV |
+| `capex.construction_progress_pct` | % | Physical progress, independent of cash spend |
+| `operating.feedstock` | enum | Any of the four (`ethane`/`propane`/`butane`/`naphtha`) — unlike Monte Carlo, this model reuses the full single-scenario economics engine |
+| `operating.nameplate_throughput_tons_day` | tons/day | Full-capacity feedstock intake |
+| `operating.*_price*`, `operating.*_cost*` | see DATA_DICTIONARY §"Feedstock economics inputs" | Same fields/units as the Phase 3 economics engine |
+| `wacc` | fraction | Annual discount rate |
+| `valuation_date` | date | t=0 for discounting |
+| `planned_commissioning_date` | date | Base-case commissioning date |
+| `ramp_up_months` | months | Length of the default linear ramp; default 6 |
+| `ramp_start_utilisation_pct` | % | Ramp starting utilization; default 30 |
+| `post_ramp_operating_life_years` | years | Steady-state operating period after ramp completes |
+| `delay_days` | days | Applied to `/project` only — `/scenarios` always evaluates a clean zero-delay base case regardless of this field |
+| `acceleration_days` / `acceleration_cost_usd` | days / USD | Only used by `/project`, and by `/scenarios`' `accelerated` scenario (which only appears if both are > 0) |
+
+## Capacity expansion financial model response
+
+| Field | Description |
+|---|---|
+| `npv_usd`, `irr_annual`, `payback_months` | `irr_annual`/`payback_months` are `null` when no root/breakeven exists in range |
+| `total_capex_deployed_usd` | `remaining_capex_usd + acceleration_cost_usd` — what's actually discounted (excludes sunk `spent_capex_usd`) |
+| `steady_state_annual_ebitda_usd` | Annual EBITDA once the ramp curve reaches its final value |
+| `commissioning_date`, `months_to_commission` | Effective (delay/acceleration-adjusted) commissioning date |
+| `schedule` | One row per month: `phase` (`construction`\|`ramp_up`\|`steady_state`), `utilisation_pct`, `capex_outflow_usd`, `ebitda_usd`, `fcf_usd`, `cumulative_fcf_usd`, `pv_usd` |
+| `governance` | `ModelGovernance`, built once per API response (see ARCHITECTURE.md) |
+
+`ScenarioComparisonResponse` (`/api/financial/scenarios`) wraps a `dict[str, ScenarioSummaryOut]`
+keyed by `base_case`, `delay_1_month`, `delay_3_month`, `delay_6_month`, and (conditionally)
+`accelerated` — each entry adds `npv_delta_vs_base_usd`, `irr_delta_vs_base_pp`,
+`payback_delta_months`, `ebitda_impact_delta_usd` on top of the same summary fields as a single
+project result.
+
 ## Governance envelope (`ModelGovernance`, every model response)
 
 | Field | Type | Description |
