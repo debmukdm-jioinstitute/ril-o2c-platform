@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import logging
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 import pandas as pd
 
@@ -40,7 +41,12 @@ logger = logging.getLogger(__name__)
 PROPANE_GAL_PER_TON = 2204.62 / 4.24
 
 LIVE_SERIES = ("crude_brent_usd_bbl", "natural_gas_usd_mmbtu", "propane_usd_ton", "fx_usdinr")
-HISTORY_START = "2015-01-01"
+# Matches SyntheticAdapter's own default start (data/synthetic/generator.py) rather than
+# reaching further back just because EIA's real history goes back to the 1980s. A longer
+# window doesn't meaningfully improve forecast quality here but does add real seconds to
+# ARIMA/XGBoost/LightGBM fit time — that tradeoff isn't worth it on Render's free-tier CPU,
+# where a 30-40s response is a real UX problem, not just a local-dev inconvenience.
+HISTORY_START = "2019-01-01"
 
 
 class LiveMarketAdapter(DataAdapter):
@@ -67,30 +73,39 @@ class LiveMarketAdapter(DataAdapter):
         return series
 
     def _live_prices(self) -> pd.DataFrame:
-        columns: dict[str, pd.Series] = {}
-
         brent_id, _ = EIA_SERIES_MAP["crude_brent_usd_bbl"]
-        brent = self._cached_fetch("crude_brent_usd_bbl", lambda: fetch_eia_series(brent_id, self._eia_api_key))
-        if brent is not None:
-            columns["crude_brent_usd_bbl"] = brent
-            self._live_ok["crude_brent_usd_bbl"] = True
-
         gas_id, _ = EIA_SERIES_MAP["natural_gas_usd_mmbtu"]
-        gas = self._cached_fetch("natural_gas_usd_mmbtu", lambda: fetch_eia_series(gas_id, self._eia_api_key))
-        if gas is not None:
-            columns["natural_gas_usd_mmbtu"] = gas
-            self._live_ok["natural_gas_usd_mmbtu"] = True
-
         propane_id, _ = EIA_SERIES_MAP["propane_usd_gal_raw"]
-        propane_gal = self._cached_fetch("propane_usd_ton", lambda: fetch_eia_series(propane_id, self._eia_api_key))
-        if propane_gal is not None:
-            columns["propane_usd_ton"] = propane_gal * PROPANE_GAL_PER_TON
-            self._live_ok["propane_usd_ton"] = True
 
-        fx = self._cached_fetch("fx_usdinr", lambda: fetch_fx_history("USD", "INR", HISTORY_START))
-        if fx is not None:
-            columns["fx_usdinr"] = fx
-            self._live_ok["fx_usdinr"] = True
+        # The four fetches are independent network I/O, so run them concurrently rather than
+        # sequentially — this is the difference between ~6s and ~1.5s of wall-clock time for
+        # load_prices() on Render's free-tier CPU, where every second matters for a request the
+        # frontend is waiting on synchronously. Threads (not asyncio) because httpx.get here is
+        # synchronous and this whole call stack (forecasting, feedstock, etc.) is sync throughout.
+        jobs = {
+            "crude_brent_usd_bbl": lambda: self._cached_fetch(
+                "crude_brent_usd_bbl", lambda: fetch_eia_series(brent_id, self._eia_api_key)
+            ),
+            "natural_gas_usd_mmbtu": lambda: self._cached_fetch(
+                "natural_gas_usd_mmbtu", lambda: fetch_eia_series(gas_id, self._eia_api_key)
+            ),
+            "propane_usd_ton": lambda: self._cached_fetch(
+                "propane_usd_ton", lambda: fetch_eia_series(propane_id, self._eia_api_key)
+            ),
+            "fx_usdinr": lambda: self._cached_fetch(
+                "fx_usdinr", lambda: fetch_fx_history("USD", "INR", HISTORY_START)
+            ),
+        }
+        with ThreadPoolExecutor(max_workers=len(jobs)) as pool:
+            results = {name: future.result() for name, future in
+                       {name: pool.submit(job) for name, job in jobs.items()}.items()}
+
+        columns: dict[str, pd.Series] = {}
+        for name, series in results.items():
+            if series is None:
+                continue
+            columns[name] = series * PROPANE_GAL_PER_TON if name == "propane_usd_ton" else series
+            self._live_ok[name] = True
 
         if not columns:
             return pd.DataFrame()
