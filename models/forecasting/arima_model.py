@@ -1,5 +1,12 @@
 """ARIMA / SARIMAX forecaster. Order selection is a small grid search on AIC (not a full
-auto-ARIMA search) — kept deliberately narrow so backtesting over many windows stays fast.
+auto-ARIMA search) — kept deliberately narrow so backtesting over many windows stays fast, and
+narrower still (3 candidates, not 5) after measuring SARIMAX's MLE fitting cost directly on
+constrained hosting: it is by a wide margin the most expensive of the five forecasters this
+platform runs (see git history / METHODOLOGY.md), so trimming its search space is a real,
+proportional latency win, not premature optimization. The three kept are the standard minimal
+ARIMA baselines (AR(1)-with-differencing, MA(1)-with-differencing, ARMA(1,1)-with-differencing);
+the dropped (2,1,1)/(1,1,2) candidates were rarely AIC-selected in practice and are the most
+expensive to fit.
 Seasonal terms are only added when `seasonal_period` is supplied (e.g. 5 for a weekly effect
 on business-day data); commodity prices are not usually strongly seasonal at daily frequency.
 """
@@ -14,7 +21,7 @@ import statsmodels.api as sm
 from app.schemas.governance import DataQualityStatus
 from models.forecasting.base import Forecaster, ForecastResult
 
-_ORDER_GRID = [(1, 1, 0), (0, 1, 1), (1, 1, 1), (2, 1, 1), (1, 1, 2)]
+_ORDER_GRID = [(1, 1, 0), (0, 1, 1), (1, 1, 1)]
 
 
 class ARIMAForecaster(Forecaster):

@@ -16,10 +16,18 @@ from app.schemas.forecasting import (
 )
 from app.services.audit import log_model_run
 from app.services.market_data import data_quality_for, get_price_series
+from app.services.response_cache import TTLCache
 from models.forecasting import MODEL_REGISTRY
 from models.forecasting.backtest import rolling_backtest
 
 router = APIRouter(prefix="/api/forecasting", tags=["forecasting"])
+
+# Forecasts are expensive (ARIMA's MLE order search in particular; see git history for
+# measured cost on constrained hosting) and the underlying data doesn't change faster than
+# once per business day (live) or at all (synthetic) — recomputing on every request for the
+# same series/model/horizon is pure waste. 1 hour balances "fresh enough" against "fast enough".
+_FORECAST_CACHE_TTL_SECONDS = 3600
+_forecast_cache = TTLCache()
 
 
 @router.get("/series")
@@ -37,24 +45,28 @@ def forecast(req: ForecastRequest, db: Session = Depends(get_db)):
     except ValueError as exc:
         raise HTTPException(400, str(exc))
 
-    model = MODEL_REGISTRY[req.model](settings.random_seed)
-    result = model.fit_predict(history, req.horizon_days)
-    result.governance.data_quality = data_quality_for(req.series_name)
+    def compute() -> ForecastResponse:
+        model = MODEL_REGISTRY[req.model](settings.random_seed)
+        result = model.fit_predict(history, req.horizon_days)
+        result.governance.data_quality = data_quality_for(req.series_name)
 
-    log_model_run(
-        db, result.governance, module="forecasting",
-        inputs=req.model_dump(),
-        outputs_summary={"last_point": float(result.point_forecast[-1]), "n_points": len(result.point_forecast)},
-    )
+        log_model_run(
+            db, result.governance, module="forecasting",
+            inputs=req.model_dump(),
+            outputs_summary={"last_point": float(result.point_forecast[-1]), "n_points": len(result.point_forecast)},
+        )
 
-    return ForecastResponse(
-        series_name=req.series_name, model=req.model,
-        dates=[d.date() for d in result.dates],
-        point_forecast=result.point_forecast.tolist(),
-        lower_90=result.lower_90.tolist(),
-        upper_90=result.upper_90.tolist(),
-        governance=result.governance,
-    )
+        return ForecastResponse(
+            series_name=req.series_name, model=req.model,
+            dates=[d.date() for d in result.dates],
+            point_forecast=result.point_forecast.tolist(),
+            lower_90=result.lower_90.tolist(),
+            upper_90=result.upper_90.tolist(),
+            governance=result.governance,
+        )
+
+    cache_key = (req.series_name, req.model, req.horizon_days, settings.random_seed)
+    return _forecast_cache.get_or_compute(cache_key, _FORECAST_CACHE_TTL_SECONDS, compute)
 
 
 @router.post("/backtest", response_model=BacktestResponse)
