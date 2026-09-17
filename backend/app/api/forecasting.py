@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
@@ -21,6 +23,7 @@ from models.forecasting import MODEL_REGISTRY
 from models.forecasting.backtest import rolling_backtest
 
 router = APIRouter(prefix="/api/forecasting", tags=["forecasting"])
+logger = logging.getLogger(__name__)
 
 # Forecasts are expensive (ARIMA's MLE order search in particular; see git history for
 # measured cost on constrained hosting) and the underlying data doesn't change faster than
@@ -28,6 +31,13 @@ router = APIRouter(prefix="/api/forecasting", tags=["forecasting"])
 # same series/model/horizon is pure waste. 1 hour balances "fresh enough" against "fast enough".
 _FORECAST_CACHE_TTL_SECONDS = 3600
 _forecast_cache = TTLCache()
+
+# The frontend's default dropdown state on page load — see frontend/app/page.tsx. Warmed at
+# startup (see main.py's lifespan handler) so the first real visitor after a cold start
+# (Render free tier sleeps the whole process after 15 min idle, so this recurs constantly for
+# a low-traffic demo, not just on deploy) gets an instant cached response instead of paying
+# the full compute cost themselves.
+DEFAULT_WARMUP_COMBO = ("crude_brent_usd_bbl", "ensemble", 90)
 
 
 @router.get("/series")
@@ -100,3 +110,30 @@ def backtest(req: BacktestRequest):
         ],
         aggregate_metrics=report.aggregate_metrics,
     )
+
+
+def warmup_default_forecast() -> None:
+    """Populate the forecast cache for DEFAULT_WARMUP_COMBO. Called from main.py's startup
+    task, outside any HTTP request — deliberately skips audit logging (no request-scoped DB
+    session available here, and this isn't a user-initiated computation worth auditing).
+    """
+    series_name, model_name, horizon_days = DEFAULT_WARMUP_COMBO
+    settings = get_settings()
+    try:
+        history = get_price_series(series_name)
+        model = MODEL_REGISTRY[model_name](settings.random_seed)
+        result = model.fit_predict(history, horizon_days)
+        result.governance.data_quality = data_quality_for(series_name)
+        response = ForecastResponse(
+            series_name=series_name, model=model_name,
+            dates=[d.date() for d in result.dates],
+            point_forecast=result.point_forecast.tolist(),
+            lower_90=result.lower_90.tolist(),
+            upper_90=result.upper_90.tolist(),
+            governance=result.governance,
+        )
+        cache_key = (series_name, model_name, horizon_days, settings.random_seed)
+        _forecast_cache.get_or_compute(cache_key, _FORECAST_CACHE_TTL_SECONDS, lambda: response)
+        logger.info("Warmed default forecast cache for %s", DEFAULT_WARMUP_COMBO)
+    except Exception:
+        logger.warning("Default forecast warmup failed (non-fatal)", exc_info=True)
