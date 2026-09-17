@@ -15,7 +15,7 @@ from app.schemas.forecasting import (
     ForecastResponse,
 )
 from app.services.audit import log_model_run
-from app.services.market_data import data_quality, get_price_series
+from app.services.market_data import data_quality_for, get_price_series
 from models.forecasting import MODEL_REGISTRY
 from models.forecasting.backtest import rolling_backtest
 
@@ -39,7 +39,7 @@ def forecast(req: ForecastRequest, db: Session = Depends(get_db)):
 
     model = MODEL_REGISTRY[req.model](settings.random_seed)
     result = model.fit_predict(history, req.horizon_days)
-    result.governance.data_quality = data_quality()
+    result.governance.data_quality = data_quality_for(req.series_name)
 
     log_model_run(
         db, result.governance, module="forecasting",

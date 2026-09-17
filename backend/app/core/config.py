@@ -28,8 +28,15 @@ class Settings(BaseSettings):
     # Reproducibility: every stochastic process in the platform seeds from this.
     random_seed: int = 42
 
-    # Synthetic data is the default data source until real/confidential data is supplied.
-    data_source_mode: str = "synthetic"  # synthetic | csv | excel | api
+    # "live" fetches real crude/gas/propane/FX from EIA + frankfurter.dev, with synthetic
+    # fallback per-series for anything with no free public source (see data/adapters/live_market.py)
+    # and on transient fetch failure. "synthetic" is used for tests/local dev by default so the
+    # suite stays deterministic and offline — see .env.example to run locally against live data.
+    data_source_mode: str = "synthetic"  # synthetic | live | csv | excel | api
+
+    # Free api.data.gov shared key; works out of the box at low rate limits. Get your own free
+    # key at eia.gov/opendata for reliable production use — see README.
+    eia_api_key: str = "DEMO_KEY"
 
     # Monte Carlo defaults
     mc_default_scenarios: int = 10_000

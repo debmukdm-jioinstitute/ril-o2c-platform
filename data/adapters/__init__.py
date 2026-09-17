@@ -1,12 +1,14 @@
 from data.adapters.api_adapter import APIAdapter
 from data.adapters.base import DataAdapter
 from data.adapters.file_adapters import CSVAdapter, ExcelAdapter
+from data.adapters.live_market import LiveMarketAdapter
 from data.adapters.synthetic_adapter import SyntheticAdapter
 
 
 def get_adapter(mode: str, **kwargs) -> DataAdapter:
     registry = {
         "synthetic": SyntheticAdapter,
+        "live": LiveMarketAdapter,
         "csv": CSVAdapter,
         "excel": ExcelAdapter,
         "api": APIAdapter,
@@ -16,4 +18,7 @@ def get_adapter(mode: str, **kwargs) -> DataAdapter:
     return registry[mode](**kwargs)
 
 
-__all__ = ["DataAdapter", "SyntheticAdapter", "CSVAdapter", "ExcelAdapter", "APIAdapter", "get_adapter"]
+__all__ = [
+    "DataAdapter", "SyntheticAdapter", "LiveMarketAdapter", "CSVAdapter", "ExcelAdapter",
+    "APIAdapter", "get_adapter",
+]

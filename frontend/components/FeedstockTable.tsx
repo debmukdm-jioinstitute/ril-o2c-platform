@@ -1,12 +1,32 @@
 "use client";
 
-import type { FeedstockComparisonRow } from "@/lib/api";
+import { dataQualityLabel, type FeedstockComparisonRow } from "@/lib/api";
 
 function fmt(n: number, digits = 0) {
   return n.toLocaleString("en-US", { maximumFractionDigits: digits, minimumFractionDigits: digits });
 }
 
-export default function FeedstockTable({ rows }: { rows: FeedstockComparisonRow[] }) {
+function QualityDot({ quality }: { quality: string | undefined }) {
+  const label = dataQualityLabel(quality);
+  const isLive = label === "Live Market Data";
+  return (
+    <span
+      title={label}
+      className={
+        "ml-2 inline-block h-1.5 w-1.5 rounded-full align-middle " +
+        (isLive ? "bg-emerald-400" : "bg-amber-400")
+      }
+    />
+  );
+}
+
+export default function FeedstockTable({
+  rows,
+  qualityByFeedstock = {},
+}: {
+  rows: FeedstockComparisonRow[];
+  qualityByFeedstock?: Record<string, string>;
+}) {
   return (
     <div className="overflow-x-auto rounded-lg border border-slate-800">
       <table className="w-full text-sm">
@@ -25,7 +45,10 @@ export default function FeedstockTable({ rows }: { rows: FeedstockComparisonRow[
           {rows.map((r) => (
             <tr key={r.scenario} className="border-t border-slate-800 hover:bg-slate-900/50">
               <td className="px-3 py-2 text-slate-400">#{r.rank}</td>
-              <td className="px-3 py-2 font-medium capitalize text-slate-100">{r.feedstock}</td>
+              <td className="px-3 py-2 font-medium capitalize text-slate-100">
+                {r.feedstock}
+                <QualityDot quality={qualityByFeedstock[r.feedstock]} />
+              </td>
               <td className="px-3 py-2 text-right tabular-nums">{fmt(r.ethylene_tons_day, 1)}</td>
               <td className="px-3 py-2 text-right tabular-nums">{fmt(r.revenue_usd_day)}</td>
               <td

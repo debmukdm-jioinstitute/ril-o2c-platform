@@ -5,6 +5,7 @@ import ForecastChart from "@/components/ForecastChart";
 import FeedstockTable from "@/components/FeedstockTable";
 import {
   api,
+  dataQualityLabel,
   type FeedstockComparisonRow,
   type ForecastResponse,
   type HealthResponse,
@@ -12,12 +13,19 @@ import {
   type SeriesListResponse,
 } from "@/lib/api";
 
-const FEEDSTOCK_BASE_PRICES: Record<string, number> = {
-  ethane: 8.5,
-  naphtha: 640,
-  propane: 520,
-  butane: 540,
+// Series pulled to build the feedstock comparison scenarios. crude_brent_usd_bbl and
+// natural_gas_usd_mmbtu aren't directly used as a feedstock price but are fetched alongside so
+// the /api/data/prices data_quality_by_series map is available for every series in one call.
+const FEEDSTOCK_PRICE_SERIES = ["ethane_usd_mmbtu", "naphtha_usd_ton", "propane_usd_ton", "butane_usd_ton", "fx_usdinr"];
+const FEEDSTOCK_TO_SERIES: Record<string, string> = {
+  ethane: "ethane_usd_mmbtu",
+  naphtha: "naphtha_usd_ton",
+  propane: "propane_usd_ton",
+  butane: "butane_usd_ton",
 };
+// Mirrors data.adapters.live_market.LIVE_SERIES — kept in sync manually since it's a small,
+// stable list; annotates the series dropdown so live vs. synthetic is visible before fetching.
+const LIVE_SERIES = new Set(["crude_brent_usd_bbl", "natural_gas_usd_mmbtu", "propane_usd_ton", "fx_usdinr"]);
 
 export default function DashboardPage() {
   const [health, setHealth] = useState<HealthResponse | null>(null);
@@ -28,6 +36,7 @@ export default function DashboardPage() {
   const [history, setHistory] = useState<PricesResponse | null>(null);
   const [forecast, setForecast] = useState<ForecastResponse | null>(null);
   const [feedstockRows, setFeedstockRows] = useState<FeedstockComparisonRow[]>([]);
+  const [feedstockQuality, setFeedstockQuality] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -52,31 +61,49 @@ export default function DashboardPage() {
   }, [seriesName, model, horizon]);
 
   useEffect(() => {
-    const scenarios = Object.fromEntries(
-      Object.entries(FEEDSTOCK_BASE_PRICES).map(([feedstock, price]) => [
-        feedstock,
-        {
-          feedstock,
-          feedstock_price: price,
-          throughput_tons_day: 3000,
-          ethylene_price_usd_ton: 950,
-          propylene_price_usd_ton: 900,
-          byproduct_price_usd_ton: 500,
-          conversion_cost_usd_ton_feedstock: 60,
-          logistics_cost_usd_ton_feedstock: 15,
-        },
-      ])
-    );
+    // Pull the latest value of every feedstock-relevant series (and FX) in one call, so the
+    // comparison table uses live prices for whichever series genuinely have them (propane, FX)
+    // and the synthetic generator's current value for the rest (ethane, naphtha, butane) —
+    // never a stale hardcoded constant either way.
     api
-      .compareFeedstocks(scenarios)
+      .prices(FEEDSTOCK_PRICE_SERIES, 1)
+      .then((latest) => {
+        const qualityByFeedstock = Object.fromEntries(
+          Object.entries(FEEDSTOCK_TO_SERIES).map(([feedstock, series]) => [
+            feedstock,
+            latest.data_quality_by_series[series],
+          ])
+        );
+        setFeedstockQuality(qualityByFeedstock);
+        const latestValue = (series: string) => latest.series[series]?.[latest.series[series].length - 1];
+        const fx = latestValue("fx_usdinr") ?? 83.5;
+
+        const scenarios = Object.fromEntries(
+          Object.entries(FEEDSTOCK_TO_SERIES).map(([feedstock, series]) => [
+            feedstock,
+            {
+              feedstock,
+              feedstock_price: latestValue(series),
+              throughput_tons_day: 3000,
+              ethylene_price_usd_ton: 950,
+              propylene_price_usd_ton: 900,
+              byproduct_price_usd_ton: 500,
+              conversion_cost_usd_ton_feedstock: 60,
+              logistics_cost_usd_ton_feedstock: 15,
+              fx_usdinr: fx,
+            },
+          ])
+        );
+        return api.compareFeedstocks(scenarios);
+      })
       .then((r) => setFeedstockRows(r.comparison))
       .catch((e) => setError(String(e)));
   }, []);
 
   const dataQualityBadge = useMemo(() => {
-    const q = history?.data_quality ?? forecast?.governance.data_quality;
+    const q = forecast?.governance.data_quality ?? history?.data_quality;
     if (!q) return null;
-    return q === "synthetic" ? "Demo/Synthetic Data" : q;
+    return dataQualityLabel(q);
   }, [history, forecast]);
 
   return (
@@ -97,7 +124,14 @@ export default function DashboardPage() {
           <div>{health ? health.status.toUpperCase() : "connecting…"}</div>
           <div>{health?.environment}</div>
           {dataQualityBadge && (
-            <span className="mt-2 inline-block rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-amber-400">
+            <span
+              className={
+                "mt-2 inline-block rounded-full border px-2 py-0.5 " +
+                (dataQualityBadge === "Live Market Data"
+                  ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-400"
+                  : "border-amber-500/40 bg-amber-500/10 text-amber-400")
+              }
+            >
               {dataQualityBadge}
             </span>
           )}
@@ -123,6 +157,7 @@ export default function DashboardPage() {
             {(seriesList?.series ?? [seriesName]).map((s) => (
               <option key={s} value={s}>
                 {s}
+                {LIVE_SERIES.has(s) ? " (live)" : ""}
               </option>
             ))}
           </select>
@@ -174,13 +209,16 @@ export default function DashboardPage() {
           Feedstock Economics — Base-Case Comparison
         </h2>
         {feedstockRows.length > 0 ? (
-          <FeedstockTable rows={feedstockRows} />
+          <FeedstockTable rows={feedstockRows} qualityByFeedstock={feedstockQuality} />
         ) : (
           <p className="text-sm text-slate-500">Loading feedstock comparison…</p>
         )}
         <p className="mt-2 text-xs text-slate-500">
           Ranking is computed from the prices and cost assumptions above — no feedstock is assumed
           structurally superior. Adjust assumptions via the API to see the ranking respond.
+          Propane and FX prices are live (EIA / ECB reference rate); ethane, naphtha, and butane
+          have no free public spot-price source (OPIS/Platts-only) and remain clearly-labeled
+          synthetic — see the badge on each row.
         </p>
       </section>
     </main>

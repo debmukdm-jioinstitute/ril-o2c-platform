@@ -18,10 +18,44 @@ feedstock optimizer.
 
 ## Training / fitting data
 
-All models in this build fit against `data/synthetic/generator.py` output by default —
+Locally and in tests, all models fit against `data/synthetic/generator.py` output —
 synthetic, seed-reproducible, explicitly labeled `"Demo/Synthetic Data"` throughout the API and
-UI (`app/schemas/governance.DataQualityStatus`). Swapping to `CSVAdapter`/`ExcelAdapter` fits
-the same models against user-supplied data instead; nothing in the model code changes.
+UI (`app/schemas/governance.DataQualityStatus`). In production (`RIL_DATA_SOURCE_MODE=live`),
+four series (crude Brent, natural gas, propane, FX) fit against genuine EIA/ECB history instead
+— labeled `"Live Market Data"` — while the rest stay synthetic; see "Live market data source"
+below. Swapping to `CSVAdapter`/`ExcelAdapter` fits the same models against user-supplied data
+instead; nothing in the model code changes regardless of adapter.
+
+## Live market data source
+
+**Method:** direct pulls from the US EIA open data API (crude, gas, propane) and frankfurter.dev
+(FX, mirroring ECB reference rates) — see METHODOLOGY.md §1b. Not a model in the ML sense; no
+fitting, just genuine published data with a documented unit conversion for propane.
+
+**Known limitations:**
+- **Not real-time.** Both sources publish once per business day; EIA has a further 1-3 business
+  day posting lag. "Live" means "freshest published real data on demand," not streaming ticks —
+  no free source for any of this exists at tick granularity, at any price.
+- **Only 4 of 9 series.** Ethane, naphtha, butane, ethylene, propylene have no free public
+  spot-price source anywhere (OPIS/Platts/ICIS, paid-subscription-only) and are never estimated
+  by any other means — an LLM recalling a plausible-sounding number is not a data source, and
+  this platform does not do that.
+- **Shared demo key rate limits.** The default `RIL_EIA_API_KEY=DEMO_KEY` is a low-quota shared
+  key; under real traffic (or heavy testing) series fall back to synthetic until the cache
+  refreshes or the rate limit resets. A free personal key removes this constraint — see README.
+- **Blended history.** A live series' historical depth is bounded by how far back the source's
+  fetched window goes; dates before that keep the synthetic generator's value for that date
+  (never a fabricated "real" one) — see METHODOLOGY.md §1b for exactly how the merge draws that
+  line, and `data_quality_for()` for how a caller can tell which regime it's looking at.
+- **Propane unit conversion** ($/gal → $/ton) uses a standard industry density figure
+  (4.24 lb/gal), not a per-shipment assay — a reasonable, disclosed approximation, not a
+  measured conversion for any specific parcel.
+
+**Evaluation:** `tests/unit/test_eia_client.py`, `test_fx_client.py`, and `test_live_market.py`
+(15 tests) cover parsing, error handling, the propane conversion, per-series quality reporting,
+caching, and a regression test for a real bug found during integration — EIA's occasional
+null-valued placeholder row for the current date defeating naive forward-fill (see
+METHODOLOGY.md §1b). All mocked; the suite never depends on live network access.
 
 ## Forecasting models
 

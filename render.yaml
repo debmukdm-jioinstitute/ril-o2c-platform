@@ -16,7 +16,9 @@ services:
           name: ril-o2c-db
           property: connectionString
       - key: RIL_DATA_SOURCE_MODE
-        value: synthetic
+        value: live
+      - key: RIL_EIA_API_KEY
+        value: DEMO_KEY
       - key: RIL_ENVIRONMENT
         value: production
 

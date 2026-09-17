@@ -30,8 +30,22 @@ Phases 1–5.
 - Real computation, not mocked/hard-coded outputs (spec module 16: no fake intelligence).
 - Unit tests that would fail if the logic were wrong (not just "does it run").
 - A governance envelope on every model output (spec module 15).
-- Synthetic data clearly labeled as such everywhere it surfaces (API responses, UI).
+- Synthetic data clearly labeled as such everywhere it surfaces (API responses, UI) — and,
+  since the live data integration, live data clearly labeled as such too, per series, never a
+  blanket claim covering series that are actually still synthetic.
 - Documented in METHODOLOGY.md with the actual formulas/algorithms used.
+
+## Live data integration (cross-cutting, not a numbered phase)
+
+Crude (Brent), natural gas (Henry Hub), propane (Mont Belvieu), and FX (USD/INR) are fetched
+from real public sources (EIA, frankfurter.dev/ECB) in production — see METHODOLOGY.md §1b,
+ARCHITECTURE.md's `LiveMarketAdapter` section, and MODEL_CARD.md's "Live market data source"
+section for the full picture, including the one real bug this surfaced (EIA's placeholder-NaN
+row defeating naive forward-fill) and how it was fixed and regression-tested. Ethane, naphtha,
+butane, ethylene, and propylene have no free public source anywhere and were deliberately left
+synthetic rather than estimated by an LLM or scraped from unstructured sources — see the
+Monte Carlo/financial-model feedstock restrictions this already caused in Phases 4-5 for the
+precedent.
 
 ## Known gaps to close in the next phase (reverse stress testing, Phase 6)
 

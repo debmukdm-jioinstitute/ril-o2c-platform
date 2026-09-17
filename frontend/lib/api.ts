@@ -18,6 +18,7 @@ export interface HealthResponse {
   app: string;
   environment: string;
   data_source_mode: string;
+  live_series_status: Record<string, boolean> | null;
   timestamp: string;
 }
 
@@ -51,6 +52,8 @@ export interface ForecastResponse {
 
 export interface PricesResponse {
   data_quality: string;
+  data_quality_by_series: Record<string, string>;
+  live_status: Record<string, boolean> | null;
   dates: string[];
   series: Record<string, number[]>;
 }
@@ -81,6 +84,18 @@ export interface FeedstockComparisonRow {
   ebitda_usd_year: number;
   ebitda_inr_cr_year: number;
   margin_pct_of_revenue: number;
+}
+
+export function dataQualityLabel(q: string | undefined | null): string {
+  switch (q) {
+    case "real_validated":
+      return "Live Market Data";
+    case "real_unvalidated":
+      return "Real Data (Unvalidated)";
+    case "synthetic":
+    default:
+      return "Demo/Synthetic Data";
+  }
 }
 
 export const api = {

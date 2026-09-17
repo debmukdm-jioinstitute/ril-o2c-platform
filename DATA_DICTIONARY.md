@@ -2,20 +2,24 @@
 
 ## Price series (`data/synthetic/generator.SERIES_SPEC`, adapter `load_prices()`)
 
-| Series name | Unit | Description |
-|---|---|---|
-| `crude_brent_usd_bbl` | USD/bbl | Brent crude oil |
-| `ethane_usd_mmbtu` | USD/MMBtu | Ethane |
-| `naphtha_usd_ton` | USD/ton | Naphtha |
-| `propane_usd_ton` | USD/ton | Propane |
-| `butane_usd_ton` | USD/ton | Butane |
-| `natural_gas_usd_mmbtu` | USD/MMBtu | Natural gas |
-| `ethylene_usd_ton` | USD/ton | Ethylene |
-| `propylene_usd_ton` | USD/ton | Propylene |
-| `fx_usdinr` | INR per USD | USD/INR exchange rate |
+| Series name | Unit | Description | Live source (production) |
+|---|---|---|---|
+| `crude_brent_usd_bbl` | USD/bbl | Brent crude oil | EIA (Europe Brent Spot Price FOB) |
+| `ethane_usd_mmbtu` | USD/MMBtu | Ethane | none free — synthetic only |
+| `naphtha_usd_ton` | USD/ton | Naphtha | none free — synthetic only |
+| `propane_usd_ton` | USD/ton | Propane | EIA (Mont Belvieu Propane Spot, $/gal→$/ton) |
+| `butane_usd_ton` | USD/ton | Butane | none free — synthetic only |
+| `natural_gas_usd_mmbtu` | USD/MMBtu | Natural gas | EIA (Henry Hub Spot Price) |
+| `ethylene_usd_ton` | USD/ton | Ethylene | none free — synthetic only |
+| `propylene_usd_ton` | USD/ton | Propylene | none free — synthetic only |
+| `fx_usdinr` | INR per USD | USD/INR exchange rate | frankfurter.dev (ECB reference rate) |
 
-All series are daily, business-day frequency (`pd.bdate_range`), synthetic by default — see
-METHODOLOGY.md §1 for how they're generated and DATA_QUALITY notes below.
+All series are daily, business-day frequency (`pd.bdate_range`). Synthetic by default
+(`RIL_DATA_SOURCE_MODE=synthetic`, used locally and in tests); in production
+(`RIL_DATA_SOURCE_MODE=live`), the four series with a live source above are fetched from real
+data with synthetic fallback on failure — see METHODOLOGY.md §1 (synthetic) and §1b (live) for
+how each is produced, and `data_quality_by_series` in the `/api/data/prices` response (or
+`ModelGovernance.data_quality` on a forecast) for which regime a given series is in *right now*.
 
 ## Operational series (adapter `load_operational()`)
 

@@ -54,18 +54,56 @@ because a side-channel audit log couldn't connect.
 
 ## Data adapter architecture
 
-`data/adapters/base.py` defines `DataAdapter` with two methods: `load_prices()` and
-`load_operational()`. Four implementations exist:
+`data/adapters/base.py` defines `DataAdapter` with two methods, `load_prices()` and
+`load_operational()`, plus `data_quality_for(series_name)` (defaults to the adapter-wide
+`data_quality`; overridden by adapters that mix real and synthetic series in one dataset).
+Five implementations exist:
 
-- `SyntheticAdapter` — wraps `data/synthetic/generator.py`, the default.
+- `SyntheticAdapter` — wraps `data/synthetic/generator.py`.
+- `LiveMarketAdapter` — see below. Used in production (`RIL_DATA_SOURCE_MODE=live`).
 - `CSVAdapter` / `ExcelAdapter` — read a `date` column plus any subset of the known series
   names from a user-supplied file.
 - `APIAdapter` — placeholder; raises `NotImplementedError` until a real provider is wired in.
 
 `backend/app/services/market_data.py` selects an adapter based on `RIL_DATA_SOURCE_MODE` and
 caches it for the process lifetime. Nothing downstream (forecasting, feedstock economics, the
-API layer) knows or cares which adapter is active — swapping `synthetic` for `csv` is a one-line
-config change.
+API layer) knows or cares which adapter is active — swapping `synthetic` for `live` or `csv` is
+a one-line config change. It also exposes `data_quality_for(series_name)` and `live_status()` so
+callers get per-series truth instead of one blanket flag.
+
+### `LiveMarketAdapter` (`data/adapters/live_market.py`)
+
+Four series are genuinely live, fetched from real public sources with no fabrication:
+
+| Platform series | Source | Client |
+|---|---|---|
+| `crude_brent_usd_bbl` | EIA (Europe Brent Spot Price FOB) | `data/adapters/eia_client.py` |
+| `natural_gas_usd_mmbtu` | EIA (Henry Hub Spot Price) | `eia_client.py` |
+| `propane_usd_ton` | EIA (Mont Belvieu Propane Spot, $/gal → $/ton) | `eia_client.py` |
+| `fx_usdinr` | frankfurter.dev (ECB reference rate) | `data/adapters/fx_client.py` |
+
+Five series (`ethane_usd_mmbtu`, `naphtha_usd_ton`, `butane_usd_ton`, `ethylene_usd_ton`,
+`propylene_usd_ton`) have **no free public source anywhere** — those prices are proprietary
+OPIS/Platts/ICIS data, paid-subscription-only regardless of budget tier. They stay synthetic,
+and `data_quality_for()` reports that honestly per series; the platform never asks an LLM to
+recall or estimate a number and present it as live.
+
+Both source APIs publish once per business day (EIA has a 1-3 business day lag; frankfurter.dev
+mirrors the ECB's daily reference rate) — "live" means "freshest published real data fetched on
+demand," not streaming ticks; no free source for any of this exists at tick granularity.
+Fetches are cached in-process for 12h (the source doesn't update faster than that anyway) and a
+failed fetch (rate limit, transient outage) falls back to the synthetic value for that series
+only — `live_status()` reports which series are currently serving real data, surfaced on
+`/api/health` and in the UI. A regression test
+(`tests/unit/test_live_market.py::test_trailing_placeholder_nan_does_not_defeat_ffill`) guards
+against a real bug found during integration: EIA occasionally returns a placeholder row for the
+current date with a null value, which — being a NaN at an *existing* index label rather than a
+missing one — silently defeats `pandas.Series.reindex(method="ffill")` unless explicitly
+dropped first.
+
+The shared `DEMO_KEY` (the `api.data.gov` convention EIA participates in) works out of the box
+but has a low, shared rate limit — production deployments should set `RIL_EIA_API_KEY` to a free
+personal key (instant signup, no payment, see README).
 
 ## Forecasting engine internals
 
@@ -186,7 +224,9 @@ mount, which is enough for this phase's control-tower stub.
 
 ## Testing strategy
 
-- `tests/unit/*` — domain logic in `models/`, `simulation/`, and `data/`, no HTTP, no DB.
+- `tests/unit/*` — domain logic in `models/`, `simulation/`, and `data/`, no HTTP, no DB, no
+  network — `test_eia_client.py`/`test_fx_client.py`/`test_live_market.py` mock every
+  `httpx.get` call, so the suite never depends on live network access or the EIA rate limit.
 - `tests/integration/test_api.py` — full FastAPI request/response cycle via `TestClient`,
   against the synthetic adapter, without requiring a live Postgres (see above).
 - `conftest.py` at the repo root puts both the repo root and `backend/` on `sys.path`, matching

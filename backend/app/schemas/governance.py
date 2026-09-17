@@ -29,4 +29,8 @@ class ModelGovernance(BaseModel):
     random_seed: int | None = None
 
     def label(self) -> str:
-        return "Demo/Synthetic Data" if self.data_quality == DataQualityStatus.SYNTHETIC else "Data"
+        return {
+            DataQualityStatus.SYNTHETIC: "Demo/Synthetic Data",
+            DataQualityStatus.REAL_VALIDATED: "Live Market Data",
+            DataQualityStatus.REAL_UNVALIDATED: "Real Data (Unvalidated)",
+        }[self.data_quality]

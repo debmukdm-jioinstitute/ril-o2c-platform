@@ -8,9 +8,13 @@ optimizer — not replace it. This repo does not build an LP solver and does not
 feedstock is structurally superior to another; every ranking and every forecast is computed
 from the inputs you supply.
 
-All data is **synthetic/demo** unless you explicitly wire in a real source (CSV, Excel, or an
-API adapter). Nothing here should be mistaken for actual Reliance Industries data or an actual
-market forecast — see [MODEL_CARD.md](MODEL_CARD.md).
+**Live data.** Crude oil (Brent), natural gas (Henry Hub), propane (Mont Belvieu), and USD/INR
+FX are fetched live from the US EIA and the ECB (via frankfurter.dev) — genuine public sources,
+free, no fabrication. Ethane, naphtha, butane, ethylene, and propylene have **no free public
+spot-price source anywhere** (OPIS/Platts/ICIS-only, thousands of dollars/month) and stay
+clearly-labeled synthetic. Nothing here is ever presented as real when it isn't — see
+[MODEL_CARD.md](MODEL_CARD.md) and the per-series badges in the UI. Nothing here should be
+mistaken for actual Reliance Industries internal data, regardless of source.
 
 ## Status
 
@@ -74,6 +78,20 @@ A Postgres instance is optional for local development — if it's unreachable, t
 serves forecasts and economics; only the audit-log write is skipped (logged as a warning).
 Bring one up with `docker compose up postgres` if you want the audit trail.
 
+**Live market data** (crude/gas/propane/FX) is off by default locally (`RIL_DATA_SOURCE_MODE=synthetic`
+in `.env.example`) so the test suite stays deterministic and offline. To run against real data:
+
+```bash
+# .env
+RIL_DATA_SOURCE_MODE=live
+RIL_EIA_API_KEY=DEMO_KEY   # works out of the box at low rate limits; get your own free key
+                            # in ~30s at https://www.eia.gov/opendata/register.php for real use
+```
+
+Any series a live fetch fails for (rate limit, transient outage) degrades to synthetic
+automatically and is labeled as such in every API response and in the UI — see
+[data/adapters/live_market.py](data/adapters/live_market.py) and MODEL_CARD.md.
+
 ### Frontend
 
 ```bash
@@ -89,11 +107,12 @@ npm run dev   # http://localhost:3000
 PYTHONPATH="$PWD/backend:$PWD" pytest
 ```
 
-106 tests cover the synthetic generator, every forecaster, backtesting, feedstock economics,
+125 tests cover the synthetic generator, every forecaster, backtesting, feedstock economics,
 switch-point analysis, the Monte Carlo scenario engine (correlation, vectorized economics,
 NPV/IRR, distribution summaries), the capacity expansion financial model (ramp-up, capex
-phasing, scenario comparison), and the API layer end-to-end (no live Postgres required — see
-`app/services/audit.py`).
+phasing, scenario comparison), the live EIA/FX data clients (mocked network calls — the suite
+never depends on network access or live rate limits), and the API layer end-to-end (no live
+Postgres required — see `app/services/audit.py`).
 
 ### Docker
 
@@ -113,7 +132,10 @@ live backend + frontend free on Render + Vercel (both connect straight to this r
 
 - **No fake intelligence.** Every model output carries a governance envelope (model name,
   data period, horizon, confidence interval, timestamp, assumptions, data-quality flag). See
-  `app/schemas/governance.py`. Synthetic data is always labeled `"Demo/Synthetic Data"`.
+  `app/schemas/governance.py`. Synthetic data is always labeled `"Demo/Synthetic Data"`; genuine
+  live data is labeled `"Live Market Data"` — per series, never a blanket claim. When a live
+  fetch fails, the platform degrades to synthetic and says so; it never has an LLM guess a
+  number and present it as real (see `data/adapters/live_market.py`).
 - **Reproducibility.** Every stochastic component takes an explicit random seed; the same
   seed + inputs always produce the same output (see `tests/unit/test_synthetic_generator.py`).
 - **No static feedstock ranking.** `models/feedstock/economics.compare_feedstocks` sorts by

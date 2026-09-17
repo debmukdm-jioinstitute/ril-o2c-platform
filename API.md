@@ -9,13 +9,19 @@ frontend side).
 
 ## Health
 
-`GET /api/health` → `{status, app, environment, data_source_mode, timestamp}`
+`GET /api/health` → `{status, app, environment, data_source_mode, live_series_status, timestamp}`.
+`live_series_status` is `null` unless `data_source_mode=live`, in which case it's
+`{series_name: bool}` for the four series with a live source — `true` means the most recent
+fetch for that series actually succeeded (see DATA_DICTIONARY.md).
 
 ## Data
 
 - `GET /api/data/prices?series=<name>&series=<name>&tail_days=500` → price history for the
-  requested series (all series if `series` is omitted), plus `data_quality`.
-- `GET /api/data/operational?tail_days=500` → demand/utilisation/freight/project-delay history.
+  requested series (all series if `series` is omitted), plus `data_quality` (deprecated blanket
+  fallback), `data_quality_by_series` (`{series_name: "synthetic"|"real_validated"}` — prefer
+  this), and `live_status` (same shape as `/api/health`'s, `null` outside live mode).
+- `GET /api/data/operational?tail_days=500` → demand/utilisation/freight/project-delay history
+  (always synthetic — no free source exists for plant-level operational data at any tier).
 
 ## Forecasting (`backend/app/api/forecasting.py`)
 
@@ -25,6 +31,8 @@ frontend side).
   {"series_name": "crude_brent_usd_bbl", "model": "ensemble", "horizon_days": 90}
   ```
   → `{series_name, model, dates[], point_forecast[], lower_90[], upper_90[], governance}`.
+  `governance.data_quality` reflects that specific series right now (`real_validated` for a
+  live series that fetched successfully, `synthetic` otherwise) — not a blanket adapter flag.
   Also writes a best-effort audit row (see ARCHITECTURE.md).
 - `POST /api/forecasting/backtest`
   ```json

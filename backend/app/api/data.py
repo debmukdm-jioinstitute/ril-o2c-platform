@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Query
 
-from app.services.market_data import data_quality, get_all_prices, get_operational_data
+from app.services.market_data import data_quality, data_quality_for, get_all_prices, get_operational_data, live_status
 
 router = APIRouter(prefix="/api/data", tags=["data"])
 
@@ -17,7 +17,9 @@ def prices(series: list[str] | None = Query(default=None), tail_days: int = Quer
         df = df[series]
     df = df.tail(tail_days)
     return {
-        "data_quality": data_quality().value,
+        "data_quality": data_quality().value,  # deprecated: blanket fallback, see data_quality_by_series
+        "data_quality_by_series": {col: data_quality_for(col).value for col in df.columns},
+        "live_status": live_status(),
         "dates": [d.date().isoformat() for d in df.index],
         "series": {col: df[col].round(4).tolist() for col in df.columns},
     }

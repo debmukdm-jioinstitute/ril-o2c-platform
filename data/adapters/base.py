@@ -24,3 +24,10 @@ class DataAdapter(ABC):
 
     def source_label(self) -> str:
         return self.data_quality.value
+
+    def data_quality_for(self, series_name: str) -> DataQualityStatus:
+        """Per-series data quality. Defaults to the adapter-wide value; adapters that mix
+        real and synthetic series in one dataset (see LiveMarketAdapter) override this so a
+        forecast on a genuinely live series isn't mislabeled synthetic, and vice versa.
+        """
+        return self.data_quality
