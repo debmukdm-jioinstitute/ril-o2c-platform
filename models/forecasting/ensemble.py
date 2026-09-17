@@ -4,6 +4,8 @@ point estimate, it only aggregates the members it's given.
 """
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
+
 import numpy as np
 import pandas as pd
 
@@ -27,8 +29,17 @@ class EnsembleForecaster(Forecaster):
 
     def fit(self, history: pd.Series) -> "EnsembleForecaster":
         self._history = history.dropna()
-        for m in self.members:
-            m.fit(self._history)
+        # Members are independent — nothing shared between them until predict() aggregates
+        # results — so fit them concurrently rather than one after another. This matters in
+        # practice: ARIMA's MLE order search is by far the slowest member (measured ~15-20x
+        # slower under a constrained/shared CPU than on typical dev hardware), and fitting
+        # sequentially means every request pays for ARIMA's slowness on top of everyone else's.
+        # Threads, not asyncio: numpy/scipy/statsmodels/xgboost/lightgbm release the GIL during
+        # their C-level number crunching, so this genuinely overlaps CPU work, not just I/O wait.
+        with ThreadPoolExecutor(max_workers=len(self.members)) as pool:
+            futures = [pool.submit(m.fit, self._history) for m in self.members]
+            for f in futures:
+                f.result()  # surface any member's fit() exception here, not silently
         self._is_fitted = True
         return self
 
