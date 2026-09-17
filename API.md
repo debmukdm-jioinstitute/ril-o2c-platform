@@ -57,6 +57,25 @@ series returns `400` with a message listing the valid options.
   → 2D sensitivity grid (`grid_points²` rows) of contribution-margin difference across both
   feedstocks' price ranges, with a `preferred` column per grid point.
 
+## Monte Carlo scenario engine (`backend/app/api/simulation.py`)
+
+- `GET /api/simulation/feedstocks` → feedstocks supported for Monte Carlo (`ethane`, `naphtha`
+  only — see MODEL_CARD.md).
+- `POST /api/simulation/monte-carlo`
+  ```json
+  {"feedstock": "ethane", "throughput_tons_day": 3000, "byproduct_price_usd_ton": 500,
+   "conversion_cost_usd_ton_feedstock": 60, "logistics_cost_usd_ton_feedstock": 15,
+   "capex_usd": 2000000000, "project_life_years": 15, "wacc": 0.11,
+   "n_scenarios": 10000, "seed": 42,
+   "ebitda_threshold_usd_year": 100000000, "ebitda_threshold_direction": "below"}
+  ```
+  → `{n_scenarios, seed, revenue, ebitda_usd_year, margin_pct, npv, irr,
+  probability_ebitda_breach, downside_case, upside_case, governance}` — see
+  DATA_DICTIONARY.md for the full field reference. `n_scenarios` below 10,000 is rejected with
+  HTTP 422 (Pydantic-level floor); an unsupported `feedstock` returns HTTP 400. Typical latency:
+  ~0.7s for 10,000 scenarios, ~1.6s for 50,000, on a single request thread — see
+  ARCHITECTURE.md for why (vectorized NPV, per-scenario `brentq` for IRR).
+
 ## Error handling
 
 All validation errors return HTTP 400 with a plain-English `detail` message (unknown series,

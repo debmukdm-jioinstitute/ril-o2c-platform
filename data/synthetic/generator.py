@@ -17,6 +17,8 @@ from dataclasses import dataclass, field
 import numpy as np
 import pandas as pd
 
+from data.common.correlation import nearest_psd_cholesky
+
 # Series covered, with plausible anchor levels (USD unless noted), annualized volatility, and
 # annualized OU mean-reversion speed (kappa; half-life = ln(2)/kappa). Levels are illustrative
 # order-of-magnitude anchors for a demo, not market quotes. Reversion speeds are calibrated so
@@ -68,19 +70,6 @@ class SyntheticMarketDataset:
     metadata: dict = field(default_factory=dict)
 
 
-def _nearest_psd_cholesky(corr: np.ndarray) -> np.ndarray:
-    """Cholesky of a correlation matrix, nudging toward PSD if numerically not quite there."""
-    try:
-        return np.linalg.cholesky(corr)
-    except np.linalg.LinAlgError:
-        eigvals, eigvecs = np.linalg.eigh(corr)
-        eigvals_clipped = np.clip(eigvals, 1e-8, None)
-        corr_psd = eigvecs @ np.diag(eigvals_clipped) @ eigvecs.T
-        d = np.sqrt(np.diag(corr_psd))
-        corr_psd = corr_psd / np.outer(d, d)
-        return np.linalg.cholesky(corr_psd)
-
-
 def generate_market_dataset(
     start: str = "2019-01-01",
     end: str = "2026-09-17",
@@ -98,7 +87,7 @@ def generate_market_dataset(
 
     corr = correlation if correlation is not None else DEFAULT_CORRELATION
     names = list(SERIES_SPEC.keys())
-    chol = _nearest_psd_cholesky(corr.loc[names, names].to_numpy())
+    chol = nearest_psd_cholesky(corr.loc[names, names].to_numpy())
 
     independent_shocks = rng.standard_normal(size=(n, len(names)))
     correlated_shocks = independent_shocks @ chol.T  # shape (n, k), corr structure applied

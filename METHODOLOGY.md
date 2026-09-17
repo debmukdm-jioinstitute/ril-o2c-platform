@@ -116,30 +116,83 @@ This engine answers "under what market conditions does A become preferable to B"
 decide how much of each feedstock to actually run; that allocation decision is the existing LP
 optimizer's job.
 
-## 5. Stochastic scenario engine / Monte Carlo **(planned, not yet implemented)**
+## 5. Stochastic scenario engine / Monte Carlo (`simulation/`)
 
-Intended approach: draw ≥10,000 correlated scenarios per run using the same
-Cholesky-factorization technique as the synthetic data generator (§1), but applied jointly to
-commodity prices, FX, demand, utilization, freight, and project-delay variables in a single
-correlated draw per scenario (never independently randomized — see `DEFAULT_CORRELATION` for
-the kind of matrix this would reuse/extend). Each scenario would be pushed through the feedstock
-economics and financial models to build empirical distributions of EBITDA, revenue, margin, NPV
-and IRR, from which percentiles, expected value, and probability-of-threshold-breach are read
-off directly (no parametric distribution assumed).
+**Market scenario draw (`simulation/market_scenarios.py`).** Unlike the daily synthetic
+generator (§1), the Monte Carlo engine draws a single *horizon-ahead level* per variable per
+scenario, not a full price path — the engine answers "what does the distribution of outcomes
+look like at the decision horizon," not "what does the path there look like," so a terminal
+draw is the right level of detail and is what keeps 10,000+ scenarios cheap. Nine variables
+(crude, ethane, naphtha, natural gas, FX, ethylene, propylene, demand, utilization) are drawn
+**jointly** via the same Cholesky-factorization technique as §1 (shared code:
+`data/common/correlation.py`) against `DEFAULT_MARKET_CORRELATION` — never independently
+randomized. For a price/FX/demand variable:
 
-## 6. Capacity expansion financial model **(planned, not yet implemented)**
+```
+level = base × exp(−½σ²T + σ√T·z)      (driftless lognormal; z is the correlated draw)
+```
+
+For utilization (a level, not a price): `level = base + σ√T·z`, clipped to [0, 100]. `T` is the
+decision horizon in years (`horizon_years`), so wider horizons produce wider distributions —
+exactly the same `σ√T` scaling used for the naive forecaster's growing interval (§2). Freight
+is modeled separately as a deterministic crude-linked component plus small idiosyncratic noise
+(freight cost is overwhelmingly a bunker-fuel/crude story); project delay is a sparse
+Bernoulli-then-uniform draw, independent of the market block, because execution/regulatory
+delay risk is a different risk class from market prices. Both simplifications are stated
+explicitly in every result's governance `assumptions`.
+
+**Per-scenario economics (`simulation/economics_mc.py`).** The exact same accounting identity
+as §3 (revenue − cash costs), vectorized over all scenarios at once, extended with two
+scenario-driven cost links the single-scenario engine doesn't need: conversion cost has a
+configurable natural-gas-linked fraction, and logistics cost splits into a fixed handling
+component plus the scenario-drawn freight. Only ethane and naphtha are supported as MC
+feedstocks — those are the two feedstocks with a scenario price variable; propane/butane remain
+available in the single-scenario switch-point engine (§4).
+
+**Per-scenario NPV/IRR (`simulation/financial_mc.py`).** A simplified project cash-flow model:
+capex at t=0, then a flat annuity of the scenario's EBITDA for `project_life_years`, discounted
+at `wacc`, with the whole stream shifted back by the scenario's `delay_days/365` years:
+
+```
+NPV = −capex + Σ_{t=1}^{N} EBITDA / (1+wacc)^(t+delay_years)
+IRR = the rate r solving NPV(r) = 0, via scipy.optimize.brentq over r ∈ [−50%, 500%]
+```
+
+IRR search bounds deliberately stop well short of −100%: rates near −100% make `(1+r)^−t` blow
+up (dividing by a near-zero base), manufacturing a mathematically "valid" but economically
+meaningless root for almost any cash flow (see `tests/unit/test_financial_mc.py`). No ramp-up
+curve or phased capex is modeled yet — that belongs to the full capacity expansion financial
+model (§6), which can reuse this module's IRR solver on a more detailed cash-flow stream.
+
+**Summarization (`simulation/distributions.py`).** Percentiles are read directly off the
+empirical scenario distribution (`numpy.percentile`) — no parametric distribution (e.g. normal)
+is assumed anywhere. Probability-of-threshold-breach is simply the fraction of scenarios where
+the metric crosses the threshold. "Downside case" / "upside case" are not synthetic — they are
+the actual scenario whose EBITDA is closest to the P5 / P95 mark, so every driver value shown
+alongside it is internally consistent (drawn together, not independently reconstructed).
+
+**Reproducibility.** `simulation.monte_carlo.run_monte_carlo` enforces a ≥10,000 scenario floor
+(spec requirement) and is fully deterministic given `seed` — same seed, same inputs, same
+output, every field (see `tests/unit/test_monte_carlo.py::test_reproducible_given_seed`).
+
+## 6. Capacity expansion financial model **(planned, not yet implemented — beyond the flat-annuity NPV/IRR in §5)**
 
 Intended approach: standard discounted cash flow over the project's construction + operating
-life. `NPV = Σ_t FCF_t / (1+r)^t − capex`; `IRR` = the discount rate solving `NPV = 0` (via
-`scipy.optimize.brentq` or `numpy_financial.irr`); payback = first period where cumulative FCF
-≥ 0. Delay scenarios (1/3/6-month, accelerated) shift the commissioning date and ramp-up curve
-and re-run the same DCF — the "economic value/cost" of a scenario is simply the NPV delta
-against the base case.
+life, with an actual multi-year ramp-up curve and phased capex schedule (§5's NPV/IRR uses a
+flat EBITDA annuity and all-at-once capex as a deliberate simplification for Monte Carlo speed).
+`NPV = Σ_t FCF_t / (1+r)^t − Σ_t capex_t`; `IRR` via the same `brentq` approach as §5; payback =
+first period where cumulative FCF ≥ 0. Delay scenarios (1/3/6-month, accelerated) shift the
+commissioning date and ramp-up curve and re-run the same DCF — the "economic value/cost" of a
+scenario is simply the NPV delta against the base case.
 
 ## 7. Reverse stress testing **(planned, not yet implemented)**
 
-Intended approach: given a target (e.g. "EBITDA down 10%"), search the Monte Carlo scenario
-population (§5) for the subset that breaches the target, then characterize that subset —
+The Monte Carlo engine (§5) already exposes what this needs — `MonteCarloResult.raw` holds
+every driver's value for every scenario, aligned by index, and
+`simulation.distributions.probability_of_breach` already computes the breach fraction for a
+single metric/threshold. What's missing is the search/characterization layer: given a target
+(e.g. "EBITDA down 10%"), filter `raw` to the scenarios that breach it, then characterize that
+subset —
 its probability mass (fraction of all scenarios), the marginal distributions of each driver
 conditional on membership in the subset (compared to the unconditional distribution — a shift
 indicates that driver matters), and a simple driver-importance ranking (e.g. by conditional mean

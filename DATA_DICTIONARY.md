@@ -52,6 +52,51 @@ METHODOLOGY.md §1 for how they're generated and DATA_QUALITY notes below.
 
 Illustrative, publicly-documented order-of-magnitude figures — not RIL-specific plant data.
 
+## Monte Carlo request (`MonteCarloRequest`, `backend/app/schemas/simulation.py`)
+
+| Field | Unit | Notes |
+|---|---|---|
+| `feedstock` | enum | `ethane` or `naphtha` only — see MODEL_CARD.md for why |
+| `throughput_tons_day` | tons/day | Base feedstock intake before utilisation scaling |
+| `byproduct_price_usd_ton` | USD/ton | Fixed (not a scenario variable) |
+| `conversion_cost_usd_ton_feedstock` | USD/ton | Base conversion cost |
+| `conversion_cost_gas_linked_fraction` | 0–1 | Share of conversion cost scaling with the natural-gas price draw; default 0.3 |
+| `logistics_cost_usd_ton_feedstock` | USD/ton | Fixed handling component (freight is added on top, drawn per scenario) |
+| `operating_days` | days/year | Default 330 |
+| `capex_usd` | USD | Project capex, spent at t=0 |
+| `project_life_years` | years | Cash-flow annuity length |
+| `wacc` | fraction | Annual discount rate, e.g. 0.11 |
+| `horizon_years` | years | Decision horizon for the market scenario draw; default 1.0 |
+| `n_scenarios` | count | ≥ 10,000 (enforced); default 10,000 |
+| `seed` | int | Default 42 |
+| `ebitda_threshold_usd_year` | USD | Optional; enables `probability_ebitda_breach` |
+| `ebitda_threshold_direction` | `below`\|`above` | Default `below` |
+
+## Monte Carlo scenario variables (`simulation.market_scenarios.MARKET_VARS`)
+
+| Variable | Unit | Correlated? |
+|---|---|---|
+| `crude` | USD/bbl | ✅ part of the 9-variable correlated block |
+| `ethane` | USD/MMBtu | ✅ |
+| `naphtha` | USD/ton | ✅ |
+| `natural_gas` | USD/MMBtu | ✅ |
+| `fx` | INR/USD | ✅ |
+| `ethylene` | USD/ton | ✅ |
+| `propylene` | USD/ton | ✅ |
+| `demand` | index, 100=base | ✅ |
+| `utilisation` | % | ✅ |
+| `freight` | USD/ton | Deterministic crude-linked component + independent noise (not in the correlated block) |
+| `project_delay_days` | days | Independent Bernoulli/uniform draw (execution risk, not market risk) |
+
+## Monte Carlo response (`MonteCarloResponse`)
+
+| Field | Description |
+|---|---|
+| `revenue`, `ebitda_usd_year`, `margin_pct`, `npv`, `irr` | Each a `DistributionOut`: mean, std, min, max, and percentiles {1,5,10,25,50,75,90,95,99} |
+| `probability_ebitda_breach` | Fraction of scenarios breaching `ebitda_threshold_usd_year`, or `null` if no threshold given |
+| `downside_case` / `upside_case` | Every driver's value for the actual scenario nearest the P5 / P95 EBITDA mark — an internally consistent scenario, not a reconstructed one |
+| `governance` | Same `ModelGovernance` envelope as every forecast |
+
 ## Governance envelope (`ModelGovernance`, every model response)
 
 | Field | Type | Description |

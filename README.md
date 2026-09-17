@@ -14,18 +14,19 @@ market forecast — see [MODEL_CARD.md](MODEL_CARD.md).
 
 ## Status
 
-This build covers Phases 1–3 of the roadmap: project skeleton, database, synthetic data,
-the market forecasting engine, and the feedstock economics + switch-point engine. See
-[RESEARCH_FRAMEWORK.md](RESEARCH_FRAMEWORK.md) for what's built vs. planned.
+This build covers Phases 1–4 of the roadmap: project skeleton, database, synthetic data,
+the market forecasting engine, feedstock economics + switch-point engine, and the correlated
+Monte Carlo stochastic scenario engine. See [RESEARCH_FRAMEWORK.md](RESEARCH_FRAMEWORK.md) for
+what's built vs. planned.
 
 | Module | Status |
 |---|---|
 | 1. Market Forecasting Engine | ✅ Built (naive, moving average, ARIMA/SARIMAX, XGBoost, LightGBM, ensemble; backtesting; metrics) |
 | 2. Feedstock Economics Engine | ✅ Built |
 | 3. Switch-Point Engine | ✅ Built (2D sensitivity grid, 3D surface, break-even solver) |
-| 4. Stochastic Scenario Engine (Monte Carlo) | ⏳ Not built — see requirements-optional.txt (PyMC) |
-| 5. Capacity Expansion Financial Model | ⏳ Not built |
-| 6. Reverse Stress Testing | ⏳ Not built |
+| 4. Stochastic Scenario Engine (Monte Carlo) | ✅ Built (≥10,000 correlated scenarios; EBITDA/revenue/margin/NPV/IRR distributions; probability of threshold breach; downside/upside cases) |
+| 5. Capacity Expansion Financial Model | ⏳ Not built — Monte Carlo NPV/IRR use a simplified flat-annuity model; a proper ramp-up/phased-capex DCF is next |
+| 6. Reverse Stress Testing | ⏳ Not built — the Monte Carlo engine already exposes the raw scenario population it would search |
 | 7. Performance Monitoring | ⏳ Not built |
 | 8. AI Root-Cause Engine | ⏳ Not built |
 | 9. AI Copilot | ⏳ Not built |
@@ -38,9 +39,9 @@ the market forecasting engine, and the feedstock economics + switch-point engine
 frontend/    Next.js + TypeScript + Tailwind — dashboard UI
 backend/     FastAPI + Pydantic — API layer, DB models, services
 models/      Forecasting and feedstock economics — pure Python, framework-agnostic
-simulation/  (reserved for Monte Carlo / stochastic scenario engine)
-financial/   (reserved for capacity expansion financial model)
-data/        Adapters (synthetic/CSV/Excel/API) + synthetic data generator
+simulation/  Monte Carlo scenario engine (correlated draws, vectorized economics, NPV/IRR)
+financial/   (reserved for the full capacity expansion financial model — Phase 5)
+data/        Adapters (synthetic/CSV/Excel/API) + synthetic data generator + shared correlation utility
 tests/       Unit + integration tests (pytest)
 docs/        Additional documentation
 docker/      Dockerfiles; see docker-compose.yml at repo root
@@ -87,9 +88,10 @@ npm run dev   # http://localhost:3000
 PYTHONPATH="$PWD/backend:$PWD" pytest
 ```
 
-40 tests cover the synthetic generator, every forecaster, backtesting, feedstock economics,
-switch-point analysis, and the API layer end-to-end (no live Postgres required — see
-`app/services/audit.py`).
+74 tests cover the synthetic generator, every forecaster, backtesting, feedstock economics,
+switch-point analysis, the Monte Carlo scenario engine (correlation, vectorized economics,
+NPV/IRR, distribution summaries), and the API layer end-to-end (no live Postgres required —
+see `app/services/audit.py`).
 
 ### Docker
 

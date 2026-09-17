@@ -31,10 +31,16 @@
 ```
 
 The rule enforced throughout: **`models/`, `simulation/`, and `financial/` never import
-anything from `backend/app/api` or `backend/app/schemas`.** They take plain Python/NumPy/Pandas
-in, and return plain dataclasses out. `backend/app/schemas/*` wraps those dataclasses in
-Pydantic models for the API boundary only. This is what lets `tests/unit/*` exercise the domain
-logic directly, with no FastAPI test client and no database.
+anything from `backend/app/api`.** They take plain Python/NumPy/Pandas in, and return plain
+dataclasses out — this is what lets `tests/unit/*` exercise the domain logic directly, with no
+FastAPI test client and no database. The one deliberate exception is
+`app.schemas.governance.ModelGovernance`: every forecaster and the Monte Carlo engine attach one
+to their output directly, rather than each domain module inventing its own metadata shape that
+`backend/app/schemas/*` would then have to translate. It's treated as a shared, stable,
+framework-light contract (a Pydantic model with no FastAPI/routing dependency), not a slide into
+importing the API layer's request/response schemas — those (`ForecastRequest`,
+`MonteCarloRequest`, etc.) still live only in `backend/app/schemas/*` and stay out of `models/`
+and `simulation/` entirely.
 
 ## Why the database is optional at request time
 
@@ -91,6 +97,36 @@ RIL-specific) steam-cracker yield profiles for ethane/propane/butane/naphtha.
 the price at which two feedstocks' margins converge (via `scipy.optimize.brentq`), and
 `sensitivity_grid_2d`/`sensitivity_surface_3d` sweep a 2D price grid for heatmaps/3D surfaces.
 
+## Monte Carlo scenario engine internals (`simulation/`)
+
+Four modules, each independently testable:
+
+- `market_scenarios.py` — draws a correlated horizon-ahead level for 9 market variables
+  (crude/ethane/naphtha/gas/FX/ethylene/propylene/demand/utilisation) via the shared Cholesky
+  utility in `data/common/correlation.py`, plus freight (crude-linked + noise) and project
+  delay (independent Bernoulli/uniform). `DataFrame` in, `DataFrame` out — no dependency on the
+  rest of `simulation/`.
+- `economics_mc.py` — a vectorized twin of `models/feedstock/economics.py`'s accounting
+  identity, extended with a gas-linked conversion-cost fraction and a freight-augmented
+  logistics cost. `tests/unit/test_economics_mc.py` pins it against the scalar engine to catch
+  formula drift between the two.
+- `financial_mc.py` — per-scenario NPV (fully vectorized) and IRR (`scipy.optimize.brentq`
+  per scenario, still fast at 10k+ scenarios since each root-find is a handful of evaluations
+  of a closed-form function).
+- `distributions.py` — percentile/probability-of-breach/nearest-scenario helpers, used only at
+  the end of the pipeline to summarize whatever arrays it's given.
+
+`monte_carlo.py` orchestrates all four into `run_monte_carlo(MonteCarloInputs) ->
+MonteCarloResult`, enforces the ≥10,000-scenario floor, and attaches a `ModelGovernance`
+envelope exactly like the forecasters do. `MonteCarloResult.raw` keeps every driver's full
+scenario array (not just summary stats) — this is what a future reverse-stress-testing module
+(spec module 6) would filter and characterize, and what "downside case"/"upside case" in the API
+response are built from (the actual scenario nearest the P5/P95 mark, not a reconstructed one).
+
+Only `ethane` and `naphtha` are supported as MC feedstocks in this phase — those are the two
+feedstocks with a scenario price variable. The API returns a clear `400` for `propane`/`butane`
+pointing at the single-scenario switch-point engine instead.
+
 ## Governance envelope
 
 Every forecaster and (where applicable) every economics run attaches a `ModelGovernance` object
@@ -109,7 +145,7 @@ mount, which is enough for this phase's control-tower stub.
 
 ## Testing strategy
 
-- `tests/unit/*` — domain logic in `models/` and `data/`, no HTTP, no DB.
+- `tests/unit/*` — domain logic in `models/`, `simulation/`, and `data/`, no HTTP, no DB.
 - `tests/integration/test_api.py` — full FastAPI request/response cycle via `TestClient`,
   against the synthetic adapter, without requiring a live Postgres (see above).
 - `conftest.py` at the repo root puts both the repo root and `backend/` on `sys.path`, matching

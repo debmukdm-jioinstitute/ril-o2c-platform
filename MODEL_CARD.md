@@ -3,9 +3,10 @@
 ## Scope
 
 This card covers every model currently implemented: the five forecasters in
-`models/forecasting/`, their ensemble, and the feedstock economics / switch-point engine in
-`models/feedstock/`. It does not cover planned-but-unbuilt modules (Monte Carlo, financial
-model, root-cause engine) — see [METHODOLOGY.md](METHODOLOGY.md) for their intended design.
+`models/forecasting/`, their ensemble, the feedstock economics / switch-point engine in
+`models/feedstock/`, and the Monte Carlo scenario engine in `simulation/`. It does not cover
+planned-but-unbuilt modules (the full capacity expansion financial model, reverse stress
+testing, root-cause engine) — see [METHODOLOGY.md](METHODOLOGY.md) for their intended design.
 
 ## Intended use
 
@@ -70,6 +71,43 @@ economics engine above — inherits all of its limitations. The break-even solve
 than guessing when no break-even exists in the supplied price bounds (see
 `tests/unit/test_switch_point.py::test_breakeven_raises_outside_bounds`).
 
+## Monte Carlo scenario engine
+
+**Method:** correlated scenario simulation, not a fitted/trained model — see METHODOLOGY.md §5.
+Nine market variables are drawn jointly per scenario via Cholesky factorization of
+`DEFAULT_MARKET_CORRELATION` (a hand-specified assumption set, like the daily synthetic
+generator's correlation matrix — not estimated from real data). Each scenario is pushed through
+the same accounting identity as the feedstock economics engine (vectorized) and a simplified
+project-finance layer to produce EBITDA/revenue/margin/NPV/IRR distributions.
+
+**Known limitations:**
+- `DEFAULT_MARKET_CORRELATION` is an assumption set, not a fitted/estimated matrix — override it
+  via `MonteCarloInputs.correlation` if a calibrated matrix becomes available.
+- Only `ethane` and `naphtha` are supported (the only two feedstocks with a scenario price
+  variable per the spec's Monte Carlo variable list); `propane`/`butane` are not — see
+  `simulation/economics_mc.MC_SUPPORTED_FEEDSTOCKS`.
+- NPV/IRR use a **flat EBITDA annuity** (same value every year) and **all-at-once capex** —
+  no ramp-up curve, no phased capital deployment. This is a deliberate simplification to keep
+  10,000+ scenarios fast to compute; the full capacity expansion financial model (Phase 5, not
+  yet built) is where a proper multi-year ramp/phasing belongs.
+- Freight and project delay are drawn independently of the correlated market block (see
+  METHODOLOGY.md §5 for the reasoning) — if evidence suggests delay risk correlates with market
+  conditions (e.g. commissioning delays cluster in high-price environments due to equipment
+  competition), that would need to be added explicitly, not assumed away.
+- Demand is drawn and reported (and correlated with product prices) but does not independently
+  scale sales volume in this build — its economic effect flows through the price correlation
+  only.
+- IRR is `NaN` for scenarios where no root exists in `[-50%, 500%]` (project never recoups, or
+  recoups so richly no realistic discount rate zeroes it) — `DistributionSummary` excludes NaNs
+  from its percentiles/mean, so the IRR distribution reported is conditional on IRR being
+  well-defined, which is disclosed in the governance assumptions but is worth restating here.
+
+**Evaluation:** `tests/unit/test_monte_carlo.py` and `tests/unit/test_market_scenarios.py`
+check reproducibility, percentile ordering, correlation fidelity (empirical correlation of
+large-sample draws matches the target matrix within tolerance), and that NPV/IRR respond
+correctly to WACC/delay changes. No Monte Carlo output is hard-coded — every number in an API
+response is computed live from the request's inputs and seed.
+
 ## Fairness / bias note
 
 The one bias risk explicitly guarded against by the spec — assuming a feedstock is structurally
@@ -79,6 +117,6 @@ this domain (commodity price/economics modeling, not decisions about people).
 
 ## Governance
 
-Every forecast response carries a `ModelGovernance` envelope: model name, version, data period,
-horizon, confidence level, generation timestamp, assumptions, data-quality flag, random seed.
-See `backend/app/schemas/governance.py`.
+Every forecast and Monte Carlo response carries a `ModelGovernance` envelope: model name,
+version, data period, horizon, confidence level, generation timestamp, assumptions,
+data-quality flag, random seed. See `backend/app/schemas/governance.py`.

@@ -91,3 +91,39 @@ def test_feedstock_switch_point(client):
     assert resp.status_code == 200
     body = resp.json()
     assert len(body["grid"]) == 25
+
+
+def test_monte_carlo(client):
+    resp = client.post("/api/simulation/monte-carlo", json={
+        "feedstock": "ethane", "throughput_tons_day": 3000, "byproduct_price_usd_ton": 500,
+        "conversion_cost_usd_ton_feedstock": 60, "logistics_cost_usd_ton_feedstock": 15,
+        "capex_usd": 2_000_000_000, "project_life_years": 15, "wacc": 0.11,
+        "n_scenarios": 10000, "seed": 42, "ebitda_threshold_usd_year": 100_000_000,
+    })
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["n_scenarios"] == 10000
+    assert body["ebitda_usd_year"]["percentiles"]["5"] <= body["ebitda_usd_year"]["percentiles"]["95"]
+    assert 0.0 <= body["probability_ebitda_breach"] <= 1.0
+    assert body["governance"]["model_name"] == "monte_carlo_scenario_engine"
+    assert "crude" in body["downside_case"]
+
+
+def test_monte_carlo_rejects_too_few_scenarios(client):
+    resp = client.post("/api/simulation/monte-carlo", json={
+        "feedstock": "ethane", "throughput_tons_day": 3000, "byproduct_price_usd_ton": 500,
+        "conversion_cost_usd_ton_feedstock": 60, "logistics_cost_usd_ton_feedstock": 15,
+        "capex_usd": 2_000_000_000, "project_life_years": 15, "wacc": 0.11,
+        "n_scenarios": 100, "seed": 42,
+    })
+    assert resp.status_code == 422  # Pydantic ge=MIN_SCENARIOS rejects it before the handler runs
+
+
+def test_monte_carlo_unknown_feedstock(client):
+    resp = client.post("/api/simulation/monte-carlo", json={
+        "feedstock": "propane", "throughput_tons_day": 3000, "byproduct_price_usd_ton": 500,
+        "conversion_cost_usd_ton_feedstock": 60, "logistics_cost_usd_ton_feedstock": 15,
+        "capex_usd": 2_000_000_000, "project_life_years": 15, "wacc": 0.11,
+        "n_scenarios": 10000, "seed": 42,
+    })
+    assert resp.status_code == 400
