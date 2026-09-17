@@ -3,10 +3,14 @@
 @tailwind utilities;
 
 :root {
-  color-scheme: dark;
+  color-scheme: light;
 }
 
 body {
-  background: #0b1120;
-  color: #e2e8f0;
+  background: #f7f4ee;
+  color: #16233f;
+}
+
+::selection {
+  background: #f3e2b0;
 }
