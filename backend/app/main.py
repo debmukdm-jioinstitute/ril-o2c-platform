@@ -36,9 +36,9 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    # Dev frontend can run on any localhost port (3000 by default, 3010+ when that's taken) —
-    # this regex covers all of them without opening CORS up to non-localhost origins.
-    allow_origin_regex=r"http://localhost:\d+",
+    # Covers local dev (any localhost port) and Vercel deployments by default; override via
+    # RIL_CORS_ALLOW_ORIGIN_REGEX for a custom frontend domain.
+    allow_origin_regex=settings.cors_allow_origin_regex,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

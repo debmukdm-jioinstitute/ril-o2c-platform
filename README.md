@@ -103,6 +103,12 @@ docker compose up --build
 
 Brings up Postgres, the FastAPI backend (port 8000), and the Next.js frontend (port 3000).
 
+### Free hosted deployment
+
+The code lives at [github.com/debmukdm-jioinstitute/ril-o2c-platform](https://github.com/debmukdm-jioinstitute/ril-o2c-platform).
+GitHub itself only serves static files — see [DEPLOYMENT.md](DEPLOYMENT.md) for deploying the
+live backend + frontend free on Render + Vercel (both connect straight to this repo).
+
 ## Design principles this repo follows
 
 - **No fake intelligence.** Every model output carries a governance envelope (model name,

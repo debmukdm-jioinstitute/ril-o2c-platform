@@ -1,0 +1,27 @@
+# Render Blueprint — free-tier backend + Postgres. Deploy: render.com/deploy?repo=<this repo url>
+# or Dashboard -> New -> Blueprint -> point at this repo. Both services below use Render's
+# free plan (web service sleeps after 15 min idle; free Postgres expires after 90 days and
+# must be recreated — fine for a demo, not for production).
+services:
+  - type: web
+    name: ril-o2c-backend
+    runtime: python
+    plan: free
+    rootDir: .
+    buildCommand: pip install -r backend/requirements.txt
+    startCommand: "PYTHONPATH=$PWD/backend:$PWD uvicorn app.main:app --host 0.0.0.0 --port $PORT"
+    envVars:
+      - key: RIL_DATABASE_URL
+        fromDatabase:
+          name: ril-o2c-db
+          property: connectionString
+      - key: RIL_DATA_SOURCE_MODE
+        value: synthetic
+      - key: RIL_ENVIRONMENT
+        value: production
+
+databases:
+  - name: ril-o2c-db
+    plan: free
+    databaseName: ril_o2c
+    user: ril_o2c
