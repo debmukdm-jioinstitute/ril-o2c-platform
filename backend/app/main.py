@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 
@@ -9,6 +10,7 @@ from app.core.config import get_settings
 from app.core.logging import configure_logging
 from app.db.base import Base, engine
 from app.db import models  # noqa: F401  (import so metadata is registered before create_all)
+from models.forecasting.warmup import warmup_models
 
 configure_logging()
 settings = get_settings()
@@ -22,6 +24,11 @@ async def lifespan(app: FastAPI):
         Base.metadata.create_all(bind=engine)
     except Exception as exc:  # pragma: no cover - degraded mode without a DB
         logging.getLogger(__name__).warning("DB unavailable at startup, audit logging disabled: %s", exc)
+
+    # Fire-and-forget in the background so the server starts accepting requests immediately —
+    # see models/forecasting/warmup.py for why this exists (one-time library init cost that
+    # would otherwise land on whichever user's request happens to be first).
+    asyncio.create_task(asyncio.to_thread(warmup_models))
     yield
 
 
