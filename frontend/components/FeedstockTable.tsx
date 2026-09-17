@@ -1,0 +1,46 @@
+"use client";
+
+import type { FeedstockComparisonRow } from "@/lib/api";
+
+function fmt(n: number, digits = 0) {
+  return n.toLocaleString("en-US", { maximumFractionDigits: digits, minimumFractionDigits: digits });
+}
+
+export default function FeedstockTable({ rows }: { rows: FeedstockComparisonRow[] }) {
+  return (
+    <div className="overflow-x-auto rounded-lg border border-slate-800">
+      <table className="w-full text-sm">
+        <thead className="bg-slate-900 text-slate-400">
+          <tr>
+            <th className="px-3 py-2 text-left font-medium">Rank</th>
+            <th className="px-3 py-2 text-left font-medium">Feedstock</th>
+            <th className="px-3 py-2 text-right font-medium">Ethylene t/d</th>
+            <th className="px-3 py-2 text-right font-medium">Revenue $/d</th>
+            <th className="px-3 py-2 text-right font-medium">CM $/t ethylene</th>
+            <th className="px-3 py-2 text-right font-medium">EBITDA ₹cr/yr</th>
+            <th className="px-3 py-2 text-right font-medium">Margin %</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr key={r.scenario} className="border-t border-slate-800 hover:bg-slate-900/50">
+              <td className="px-3 py-2 text-slate-400">#{r.rank}</td>
+              <td className="px-3 py-2 font-medium capitalize text-slate-100">{r.feedstock}</td>
+              <td className="px-3 py-2 text-right tabular-nums">{fmt(r.ethylene_tons_day, 1)}</td>
+              <td className="px-3 py-2 text-right tabular-nums">{fmt(r.revenue_usd_day)}</td>
+              <td
+                className={`px-3 py-2 text-right tabular-nums font-medium ${
+                  r.cm_usd_per_ton_ethylene >= 0 ? "text-emerald-400" : "text-rose-400"
+                }`}
+              >
+                {fmt(r.cm_usd_per_ton_ethylene, 1)}
+              </td>
+              <td className="px-3 py-2 text-right tabular-nums">{fmt(r.ebitda_inr_cr_year, 1)}</td>
+              <td className="px-3 py-2 text-right tabular-nums">{fmt(r.margin_pct_of_revenue, 2)}%</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}

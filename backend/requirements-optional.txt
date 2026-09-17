@@ -1,0 +1,5 @@
+# Not required by the code shipped so far. Install when the Monte Carlo / Bayesian module
+# (spec module 4, stochastic scenario engine) is built — PyMC is heavy and unrelated to
+# forecasting/feedstock economics, so it's kept out of the base install until it's used.
+pymc>=5.17.0
+arviz>=0.20.0

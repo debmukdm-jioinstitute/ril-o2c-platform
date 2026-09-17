@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Node / Next.js
+node_modules/
+.next/
+out/
+frontend/.env.local
+
+# Env
+.env
+.env.local
+
+# OS
+.DS_Store
+
+# Native lib workaround artifacts (see scripts/fix_macos_openmp.sh)
+.venv/native-libs/
+
+# IDE
+.vscode/
+.idea/

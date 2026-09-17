@@ -1,0 +1,24 @@
+# Pinned to versions verified to install and pass tests in this environment (Python 3.14,
+# macOS arm64) as of the last dependency update. Re-freeze with `pip freeze` after intentional
+# upgrades.
+fastapi==0.141.1
+uvicorn[standard]==0.53.0
+pydantic==2.13.5
+pydantic-settings==2.15.0
+sqlalchemy==2.0.54
+psycopg[binary]==3.3.5
+alembic==1.20.0
+numpy==2.5.3
+pandas==3.0.5
+scipy==1.18.1
+statsmodels==0.15.0
+scikit-learn==1.9.1
+xgboost==3.4.1
+lightgbm==4.7.0
+plotly==7.1.0
+python-multipart==0.0.32
+openpyxl==3.1.5
+pytest==9.1.1
+pytest-cov==7.1.0
+httpx==0.28.1
+python-dotenv==1.2.3
